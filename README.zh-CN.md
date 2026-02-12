@@ -33,8 +33,8 @@ Claude Code 负责需求分析、任务拆解和代码 Review；Codex 负责实�
 +-----------------------------------------+
 ```
 
-![工作流图 1](./workflw.png)
-![工作流图 2](./%E5%B7%A5%E4%BD%9C%E6%B5%81.png)
+![工作流图 1](./docs/images/workflow-en.png)
+![工作流图 2](./docs/images/workflow-zh.png)
 
 ## 前置要求
 
@@ -45,7 +45,6 @@ Claude Code 负责需求分析、任务拆解和代码 Review；Codex 负责实�
 ## 快速开始
 
 ```bash
-cd cc-claude-codex
 python scripts/setup.py
 ```
 
@@ -88,7 +87,9 @@ python ~/.claude/skills/cc-claude-codex/scripts/cc-claude-codex.py --max-timeout
 ## 项目结构
 
 ```
-cc-claude-codex/
+.
+|-- README.md
+|-- README.zh-CN.md
 |-- SKILL.md
 |-- scripts/
 |   |-- cc-claude-codex.py
@@ -96,10 +97,14 @@ cc-claude-codex/
 |   |-- stop_check.py
 |   |-- pre_compact.py
 |   `-- session_inject.py
-`-- references/
-    |-- hooks-config.md
-    |-- status-template.md
-    `-- progress-template.md
+|-- references/
+|   |-- hooks-config.md
+|   |-- status-template.md
+|   `-- progress-template.md
+`-- docs/
+    `-- images/
+        |-- workflow-en.png
+        `-- workflow-zh.png
 ```
 
 运行时会在项目根目录生成：

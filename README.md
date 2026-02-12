@@ -33,8 +33,8 @@ User Request
 +-----------------------------------------+
 ```
 
-![Workflow Diagram 1](./workflw.png)
-![Workflow Diagram 2](./%E5%B7%A5%E4%BD%9C%E6%B5%81.png)
+![Workflow Diagram 1](./docs/images/workflow-en.png)
+![Workflow Diagram 2](./docs/images/workflow-zh.png)
 
 ## Prerequisites
 
@@ -45,7 +45,6 @@ User Request
 ## Quickstart
 
 ```bash
-cd cc-claude-codex
 python scripts/setup.py
 ```
 
@@ -87,7 +86,9 @@ python ~/.claude/skills/cc-claude-codex/scripts/cc-claude-codex.py --max-timeout
 ## Project Structure
 
 ```
-cc-claude-codex/
+.
+|-- README.md
+|-- README.zh-CN.md
 |-- SKILL.md
 |-- scripts/
 |   |-- cc-claude-codex.py
@@ -95,10 +96,14 @@ cc-claude-codex/
 |   |-- stop_check.py
 |   |-- pre_compact.py
 |   `-- session_inject.py
-`-- references/
-    |-- hooks-config.md
-    |-- status-template.md
-    `-- progress-template.md
+|-- references/
+|   |-- hooks-config.md
+|   |-- status-template.md
+|   `-- progress-template.md
+`-- docs/
+    `-- images/
+        |-- workflow-en.png
+        `-- workflow-zh.png
 ```
 
 Runtime files created in your project root:
