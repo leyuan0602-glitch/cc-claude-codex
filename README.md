@@ -8,33 +8,7 @@ For Chinese documentation, see `README.zh-CN.md`.
 
 ## Workflow
 
-```
-User Request
-  |
-  v
-+-----------------------------------------+
-| Claude Code (Supervisor)                |
-| 1. Analyze request and split subtasks   |
-| 2. Write status.md + codex-progress.md  |
-| 3. Run cc-claude-codex.py               |
-+-------------------+---------------------+
-                    |
-                    v
-+-----------------------------------------+
-| Codex (Executor)                        |
-| Read codex-progress.md -> code -> sync  |
-+-------------------+---------------------+
-                    |
-                    v
-+-----------------------------------------+
-| Claude Code (Review)                    |
-| git diff checks -> PASS: commit/next    |
-|                   FAIL: fix guide/retry |
-+-----------------------------------------+
-```
-
-![Workflow Diagram 1](./docs/images/workflow-en.png)
-![Workflow Diagram 2](./docs/images/workflow-zh.png)
+![Workflow Diagram](./docs/images/workflow-en.png)
 
 ## Prerequisites
 
