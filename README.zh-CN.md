@@ -1,8 +1,8 @@
 ﻿# CC Claude Codex
 
-CC Claude Codex 是一个双 Agent 开发编排工作流：Claude Code 作为 Supervisor，Codex 作为 Executor。
+这是一个 Agent skill：让 Claude Code 编排 Codex 完成复杂项目自动化，并通过 Markdown 文件进行可靠的状态跟踪。
 
-Claude Code 负责需求分析、任务拆解和代码 Review；Codex 负责实现。两者通过 `.cc-claude-codex/` 目录中的 Markdown 文件协作，形成 **规划 -> 执行 -> 审查 -> 修正** 的自动化闭环。
+它充分利用 Claude Code 更好的审美与沟通能力来做规划和评审，同时发挥 Codex 准确的执行能力来完成实现。
 
 英文文档请见 `README.md`。
 

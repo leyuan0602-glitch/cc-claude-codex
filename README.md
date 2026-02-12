@@ -1,8 +1,8 @@
 ﻿# CC Claude Codex
 
-CC Claude Codex is a dual-agent development orchestration workflow where Claude Code acts as Supervisor and Codex acts as Executor.
+Agent skill that lets Claude Code orchestrate Codex for complex project automation, using Markdown files for reliable state tracking.
 
-Claude Code handles requirement analysis, task decomposition, and code review; Codex focuses on implementation. They hand off work through Markdown files in `.cc-claude-codex/`, forming an automated loop of **Plan -> Execute -> Review -> Fix**.
+It combines Claude Code's stronger taste and communication for planning/review with Codex's precise execution for implementation.
 
 For Chinese documentation, see `README.zh-CN.md`.
 
