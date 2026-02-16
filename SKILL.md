@@ -28,18 +28,26 @@ Before each run:
 ## Phase 1: Requirement Analysis
 
 1. Analyze user request; ask clarification questions if ambiguous
-2. Break into concrete, verifiable subtasks
-3. Define clear acceptance criteria and impacted files per subtask
-4. Write requirement spec and subtasks to `.cc-claude-codex/status.md`
-5. If there are more than 5 subtasks, split into batches (1-3 per round)
+2. Write a structured requirement spec to `.cc-claude-codex/status.md`:
+   - **Goal / Context / Tech Stack** — concise project overview
+   - **Requirements** — each as a `### Requirement:` block with normative language (MUST/SHOULD/MAY)
+   - **Scenarios** — every requirement gets at least one `#### Scenario:` using Given/When/Then format. These become the acceptance criteria for review.
+3. Break requirements into subtasks. Each subtask must reference which Requirement > Scenario it covers, state its acceptance condition, and list its file scope
+4. If there are more than 5 subtasks, split into batches (1-3 per round)
 
 ## Phase 2: Codex Execution
 
 1. Run `git status --porcelain` to inspect workspace
    - If uncommitted changes could interfere with current batch, commit first
-2. Create `.cc-claude-codex/codex-progress.md` (see `references/progress-template.md`) and include:
-   - Current-batch task steps (selected from `status.md`)
-   - Acceptance criteria and affected files for each step
+2. Create `.cc-claude-codex/codex-progress.md` (see `references/progress-template.md`) with:
+   - **Task Goal** — one sentence stating what this batch achieves
+   - **Project Conventions** — tech stack, patterns to follow/avoid, relevant existing files, test conventions. This section is critical: Codex starts with zero context and cannot infer project conventions on its own.
+   - **Steps** — each step uses the "intent + scope + acceptance + constraints" format:
+     - *Intent:* what to achieve and why (the goal, not the implementation)
+     - *Scope:* which files to create or modify
+     - *Acceptance:* observable outcome that proves the step is done
+     - *Constraints:* project-specific rules for this step (optional, only when needed)
+   - **Do not** write exact code or step-by-step implementation instructions. Codex is a capable model — give it clear goals and boundaries, let it decide the how.
 3. Invoke `cc-claude-codex.py`:
    ```bash
    # Standard development
@@ -60,7 +68,7 @@ Before each run:
 
 ### Validation Checklist
 
-- [ ] Functional completeness: Does each acceptance criterion pass?
+- [ ] Scenario coverage: Does each requirement scenario's THEN/AND clause hold true?
 - [ ] File scope: Were only expected files modified? Any accidental changes?
 - [ ] Code quality: Any obvious bugs, hardcoded values, or security risks?
 - [ ] Edge cases: Error handling, null/empty cases, concurrency considered?
@@ -68,7 +76,7 @@ Before each run:
 - [ ] Type checks: For TS projects, does `tsc --noEmit` pass?
 - [ ] Product-manager acceptance: Validate from a PM lens, not just an engineering lens (user value, UX flow clarity, requirement fit, and release readiness). Keep judgment sharp and non-compromising; if product quality is not strong enough, mark FAIL.
 
-3. Write validation results to the verification table in `.cc-claude-codex/status.md`
+3. Write validation results to the verification table in `.cc-claude-codex/status.md`, linking each row to the specific scenario verified
 
 ## Phase 4: Decision
 
@@ -103,21 +111,23 @@ Before each run:
 
 1. Update immediately after each step (no batching)
 2. Use timestamp format `YYYY-MM-DD HH:MM`
-3. Subtask format: `- [ ] description` / `- [x] description (completion-time)`
-4. Update validation table after every review
-5. Append Codex execution log after every invocation
-6. Snapshot is automatic before compact (PreCompact hook)
-7. State injection is automatic after compact (SessionStart hook)
+3. **Requirements** use `### Requirement:` headers with MUST/SHOULD/MAY language; each has at least one `#### Scenario:` with Given/When/Then
+4. **Subtasks** use `- [ ] description` / `- [x] description (completion-time)` and must reference which Requirement > Scenario they cover
+5. **Verification table** links each row to the specific scenario verified, not just the subtask name
+6. Append Codex execution log after every invocation
+7. Snapshot is automatic before compact (PreCompact hook)
+8. State injection is automatic after compact (SessionStart hook)
 
 ## `codex-progress.md` Lifecycle
 
-1. **Create**: Claude Code creates in Phase 2 and writes current batch steps
-2. **During execution**: Codex updates step status, execution records, and blockers
-3. **After review**:
+1. **Create**: Claude Code creates in Phase 2 with task goal, project conventions, and steps
+2. **Step format**: Each step uses "intent + scope + acceptance + constraints" — define *what* and *where*, not *how*. Codex has full implementation freedom within the stated scope and constraints.
+3. **During execution**: Codex updates step status, execution records, and blockers
+4. **After review**:
    - PASS -> Claude Code deletes the file
-   - FAIL -> Claude Code updates and re-runs
+   - FAIL -> Claude Code updates with specific failure info and re-runs
    - Abnormal exit -> Claude Code reads it and decides next step
-4. **If file exists, active Codex work exists**
+5. **If file exists, active Codex work exists**
 
 ## Hooks Reference
 
@@ -132,11 +142,13 @@ See `references/hooks-config.md` for details.
 ## Key Rules
 
 1. **Never skip review** — Always verify with `git diff`, even if Codex says done
-2. **Use precise prompts** — Specify files/functions; vague prompts reduce output quality
-3. **Batch large tasks** — Limit each Codex run to 1-3 tightly related subtasks
-4. **Treat `status.md` as truth** — Update per step so compact does not lose context
-5. **Know when to stop** — On unrecoverable errors or retry limit, mark `🛑 Aborted` and escalate
-6. **Validation checklist must fully pass** — Any failed item means FAIL
-7. **Commit after every PASS batch** — Keep each successful round rollback-safe
-8. **`codex-progress.md` exists = active work** — Delete after PASS, update and rerun after FAIL
-9. **Review with a PM mindset, not only a programmer mindset** — Do not pass work that is merely technically correct. Keep review language sharp and standards non-negotiable.
+2. **Define intent, not implementation** — Progress steps specify what to achieve and where, not how. Give Codex clear goals and boundaries; let it decide the approach.
+3. **Structure requirements with scenarios** — Every requirement in `status.md` uses Requirement + Scenario (Given/When/Then). This makes acceptance criteria explicit from the start and review traceable at the end.
+4. **Inject project conventions** — Codex is stateless. Always include tech stack, patterns, and relevant file references in `codex-progress.md`. Without this context, Codex will guess and likely diverge from project norms.
+5. **Batch large tasks** — Limit each Codex run to 1-3 tightly related subtasks
+6. **Treat `status.md` as truth** — Update per step so compact does not lose context
+7. **Know when to stop** — On unrecoverable errors or retry limit, mark `🛑 Aborted` and escalate
+8. **Validation checklist must fully pass** — Any failed item means FAIL
+9. **Commit after every PASS batch** — Keep each successful round rollback-safe
+10. **`codex-progress.md` exists = active work** — Delete after PASS, update and rerun after FAIL
+11. **Review with a PM mindset, not only a programmer mindset** — Do not pass work that is merely technically correct. Keep review language sharp and standards non-negotiable.
