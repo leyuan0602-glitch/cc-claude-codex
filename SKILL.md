@@ -59,38 +59,77 @@ Before each run:
 4. `cc-claude-codex.py` instructs Codex to read `codex-progress.md`; Codex updates the file after each completed step
 5. Wait for return and collect three outputs: `exit_reason` + `codex-progress.md` content + final Codex output
 
-## Phase 3: Mandatory Review (Never Skip)
+## Phase 3: Independent Acceptance (Never Skip)
 
-**“Completed” from Codex is not proof of completion.**
+**"Completed" from Codex is not proof of completion.**
 
-1. Inspect all changes with `git diff`
-2. Validate against acceptance criteria using this checklist:
+Codex returns three pieces of data: `exit_reason`, `codex-progress.md` content, and final Codex output. These are **reference only `[REF]`** — never use them as acceptance evidence.
 
-### Validation Checklist
+Execute the `code-acceptance` three-pillar verification flow:
 
-- [ ] Scenario coverage: Does each requirement scenario's THEN/AND clause hold true?
-- [ ] File scope: Were only expected files modified? Any accidental changes?
-- [ ] Code quality: Any obvious bugs, hardcoded values, or security risks?
-- [ ] Edge cases: Error handling, null/empty cases, concurrency considered?
-- [ ] Tests: If test commands exist, run and confirm pass
-- [ ] Type checks: For TS projects, does `tsc --noEmit` pass?
-- [ ] Product-manager acceptance: Validate from a PM lens, not just an engineering lens (user value, UX flow clarity, requirement fit, and release readiness). Keep judgment sharp and non-compromising; if product quality is not strong enough, mark FAIL.
+### 3.0 Build Context
 
-3. Write validation results to the verification table in `.cc-claude-codex/status.md`, linking each row to the specific scenario verified
+1. Run `git diff HEAD~1 --stat` and `git diff HEAD~1` to get actual changes
+2. Read `.cc-claude-codex/status.md` — extract current batch's Requirements and Scenarios (Given/When/Then)
+3. Mark Codex return data as `[REF]` for cross-checking only
+
+### 3A. Code Review (gate)
+
+- Verify each Scenario's THEN/AND clause by reading actual source at `file:line`
+- OWASP security scan on changed code
+- Code quality: error handling, structure, naming, edge cases
+- Check new logic has corresponding test files
+- Every judgment requires `file:line` evidence
+- **CRITICAL issue → FAIL, skip 3B and 3C**
+
+### 3B. Functional Testing (gate)
+
+- Write independent verification tests (`_acceptance_verify_*` files) based on Given/When/Then scenarios — do not rely on Codex-written tests
+- Frontend/UI tasks: use chrome-devtools MCP for browser verification
+- Run project's existing test suite (detect from package.json, pyproject.toml, etc.)
+- **Delete all `_acceptance_verify_*` files after recording results**
+- **Any test failure → FAIL, skip 3C**
+
+### 3C. Product Aesthetics
+
+- Requirement fit: does the implementation truly solve the user's problem?
+- Interaction quality: elegant flows, graceful edge states
+- Information hierarchy: professional naming, clear messaging
+- Craft quality: would a discerning PM be proud to ship this?
+- Cite specific code/UI elements as evidence
+
+### Anti-Hallucination Self-Check
+
+After completing all pillars, verify:
+- Every PASS has `file:line` evidence
+- Every test PASS has actual command output
+- No forbidden phrases used without evidence ("looks fine", "should work", "LGTM")
+
+### Verdict
+
+| Pillar A | Pillar B | Pillar C | Verdict |
+|----------|----------|----------|---------|
+| PASS | PASS | PASS | **PASS** |
+| PASS | PASS | ISSUES | **CONDITIONAL_PASS** |
+| PASS | FAIL | — | **FAIL** |
+| CRITICAL | — | — | **FAIL** |
+
+Write the acceptance report to `.cc-claude-codex/status.md` verification table, linking each row to the specific Scenario verified.
 
 ## Phase 4: Decision
 
-### PASS
+### PASS / CONDITIONAL_PASS
 1. Update `.cc-claude-codex/status.md` (mark completed items `[x]`, refresh timestamp, append Codex execution log)
 2. Commit batch changes: `git add -A && git commit -m "cc-claude-codex: <batch-summary>"`
 3. **Delete `.cc-claude-codex/codex-progress.md`**
-4. If more batches remain, return to Phase 2
-5. When everything is complete, report a final summary to user
+4. If CONDITIONAL_PASS: record aesthetic issues in `status.md` Known Issues section for future improvement
+5. If more batches remain, return to Phase 2
+6. When everything is complete, report a final summary to user
 
 ### FAIL
 1. **Do not delete `codex-progress.md`**. Update it with:
-   - Which steps failed and exact issues
-   - Fix instructions (including file paths/line hints and error details)
+   - Which steps failed and exact issues (from acceptance report's `file:line` references)
+   - Fix instructions (including file paths/line hints and error details from the acceptance report)
 2. Re-run `cc-claude-codex.py` (Codex continues from updated progress)
 3. Retry by default until success or unrecoverable error
 4. If user defined max retries and limit is reached:
@@ -148,7 +187,7 @@ See `references/hooks-config.md` for details.
 5. **Batch large tasks** — Limit each Codex run to 1-3 tightly related subtasks
 6. **Treat `status.md` as truth** — Update per step so compact does not lose context
 7. **Know when to stop** — On unrecoverable errors or retry limit, mark `🛑 Aborted` and escalate
-8. **Validation checklist must fully pass** — Any failed item means FAIL
+8. **Three-pillar acceptance must pass** — Code review (with `file:line` evidence), functional testing (independent verification), and product aesthetics. Any pillar FAIL means overall FAIL.
 9. **Commit after every PASS batch** — Keep each successful round rollback-safe
 10. **`codex-progress.md` exists = active work** — Delete after PASS, update and rerun after FAIL
-11. **Review with a PM mindset, not only a programmer mindset** — Do not pass work that is merely technically correct. Keep review language sharp and standards non-negotiable.
+11. **Product aesthetics are non-negotiable** — Do not pass work that merely functions. Evaluate craft quality, interaction elegance, and information hierarchy from a discerning PM's perspective.

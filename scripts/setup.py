@@ -44,6 +44,17 @@ def copy_skill(src: Path, dest: Path):
         if f.is_file():
             shutil.copy2(f, refs_dest / f.name)
 
+    # Copy code-acceptance/ skill (standalone acceptance skill)
+    acceptance_src = src / "code-acceptance"
+    if acceptance_src.exists():
+        acceptance_dest = dest.parent / "code-acceptance"
+        if acceptance_dest.exists():
+            shutil.rmtree(acceptance_dest)
+        acceptance_dest.mkdir(parents=True, exist_ok=True)
+        for f in acceptance_src.iterdir():
+            if f.is_file():
+                shutil.copy2(f, acceptance_dest / f.name)
+
 
 def generate_hooks_config(skill_dir: Path) -> dict:
     """Generate hooks JSON config with platform-correct paths."""

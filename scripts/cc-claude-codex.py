@@ -20,7 +20,9 @@ from pathlib import Path
 
 IS_WINDOWS = platform.system() == "Windows"
 
-CODEX_PROMPT = """Read .cc-claude-codex/codex-progress.md. This is your task file.
+CODEX_PROMPT = """$code-implementation-flow
+
+Read .cc-claude-codex/codex-progress.md. This is your task file.
 
 Working rules:
 1. Read .cc-claude-codex/codex-progress.md first to understand goals and current progress.
