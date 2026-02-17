@@ -20,19 +20,19 @@ from pathlib import Path
 
 IS_WINDOWS = platform.system() == "Windows"
 
-CODEX_PROMPT = """$code-implementation-flow
-
-Read .cc-claude-codex/codex-progress.md. This is your task file.
+CODEX_PROMPT = """Read .cc-claude-codex/codex-progress.md now. This is your task file — it contains the goal, project conventions, and step-by-step instructions.
 
 Working rules:
-1. Read .cc-claude-codex/codex-progress.md first to understand goals and current progress.
-2. Start from the first unfinished step.
+1. Read .cc-claude-codex/codex-progress.md FIRST to understand goals and current progress.
+2. Start from the first unfinished step (unchecked [ ] item).
 3. After each finished step, immediately update .cc-claude-codex/codex-progress.md:
    - Mark that step as [x]
    - Append what you changed and which files were modified in the "Execution Log" section
 4. Only modify files required by the task.
 5. If blocked and unable to continue, record the reason in the "Blockers" section and stop.
-6. After all steps are done, set the top status to ✅ Completed."""
+6. After all steps are done, set the top status to "Completed" and update Last Updated.
+
+Begin now — read the file and start working."""
 
 
 def configure_stdio():
