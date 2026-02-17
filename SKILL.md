@@ -5,7 +5,19 @@ description: "Development skill where Claude Code acts as supervisor and Codex a
 
 # CC Claude Codex v2: Claude Code + Codex Development Loop
 
-You are the Supervisor Agent (Claude Code). You analyze requirements, break work into tasks, direct Codex execution, review outputs, and maintain project state. Codex is your Executor, invoked through `cc-claude-codex.py`.
+You are the Supervisor Agent (Claude Code). You analyze requirements, break work into tasks, direct Codex execution, verify outputs through tests, and maintain project state. Codex is your Executor, invoked through `cc-claude-codex.py`.
+
+## Hard Constraint: No Direct Code Modification
+
+**Claude Code (Supervisor) MUST NEVER directly create, edit, or modify implementation code.** All code changes — new files, bug fixes, refactoring, test writing — must be delegated to Codex via `cc-claude-codex.py`.
+
+Claude Code may only:
+- Read and analyze code (for requirement analysis and test verification)
+- Create/edit `.cc-claude-codex/` files (status.md, codex-progress.md)
+- Run git commands, test commands, and verification scripts
+- Write `_acceptance_verify_*` temporary test files (deleted after verification)
+
+If Codex fails and code needs fixing, update `codex-progress.md` with fix instructions and re-run Codex. **Never patch the code yourself.**
 
 ## File Responsibilities
 
@@ -61,58 +73,60 @@ Before each run:
 
 ## Phase 3: Independent Acceptance (Never Skip)
 
-**"Completed" from Codex is not proof of completion.**
+**"Completed" from Codex is not proof of completion. Only passing tests are proof.**
 
 Codex returns three pieces of data: `exit_reason`, `codex-progress.md` content, and final Codex output. These are **reference only `[REF]`** — never use them as acceptance evidence.
 
-Execute the `code-acceptance` three-pillar verification flow:
+Execute the `code-acceptance` test-based verification flow. **Do not review code implementation** — only test outcomes matter.
 
 ### 3.0 Build Context
 
-1. Run `git diff HEAD~1 --stat` and `git diff HEAD~1` to get actual changes
+1. Run `git diff HEAD~1 --stat` to get changed files overview
 2. Read `.cc-claude-codex/status.md` — extract current batch's Requirements and Scenarios (Given/When/Then)
 3. Mark Codex return data as `[REF]` for cross-checking only
 
-### 3A. Code Review (gate)
+### 3A. Write Verification Tests
 
-- Verify each Scenario's THEN/AND clause by reading actual source at `file:line`
-- OWASP security scan on changed code
-- Code quality: error handling, structure, naming, edge cases
-- Check new logic has corresponding test files
-- Every judgment requires `file:line` evidence
-- **CRITICAL issue → FAIL, skip 3B and 3C**
+- For each Given/When/Then scenario, write executable test scripts (`_acceptance_verify_*` files)
+- Backend/logic: unit tests or integration tests in the project's language
+- Frontend/UI: E2E tests using the `agent-browser` skill for browser automation
+- Tests must be independent from executor-written tests — re-derive from scenario descriptions
 
-### 3B. Functional Testing (gate)
+### 3B. Run All Tests (gate)
 
-- Write independent verification tests (`_acceptance_verify_*` files) based on Given/When/Then scenarios — do not rely on Codex-written tests
-- Frontend/UI tasks: use chrome-devtools MCP for browser verification
+- Execute all `_acceptance_verify_*` verification tests
 - Run project's existing test suite (detect from package.json, pyproject.toml, etc.)
+- Record actual command and full output for each
+- **Any test failure → FAIL**
+
+### 3C. Product Aesthetics (UI tasks only)
+
+- Skip if the task has no user-facing interface
+- Capture screenshots of all key states via the `agent-browser` skill
+- Evaluate: requirement fit, interaction quality, information hierarchy, craft quality
+- Aesthetic issues produce `FAIL`, same as test failures — shipping ugly is shipping broken
+
+### 3D. Cleanup
+
 - **Delete all `_acceptance_verify_*` files after recording results**
-- **Any test failure → FAIL, skip 3C**
-
-### 3C. Product Aesthetics
-
-- Requirement fit: does the implementation truly solve the user's problem?
-- Interaction quality: elegant flows, graceful edge states
-- Information hierarchy: professional naming, clear messaging
-- Craft quality: would a discerning PM be proud to ship this?
-- Cite specific code/UI elements as evidence
+- `git checkout -- . 2>/dev/null` to restore any files modified during verification
 
 ### Anti-Hallucination Self-Check
 
-After completing all pillars, verify:
-- Every PASS has `file:line` evidence
-- Every test PASS has actual command output
+After testing, verify:
+- Every scenario has a corresponding verification test
+- Every test PASS has actual command output as evidence
+- All `_acceptance_verify_*` files are deleted
+- (UI tasks) Every key state has a screenshot
 - No forbidden phrases used without evidence ("looks fine", "should work", "LGTM")
 
 ### Verdict
 
-| Pillar A | Pillar B | Pillar C | Verdict |
-|----------|----------|----------|---------|
-| PASS | PASS | PASS | **PASS** |
-| PASS | PASS | ISSUES | **CONDITIONAL_PASS** |
-| PASS | FAIL | — | **FAIL** |
-| CRITICAL | — | — | **FAIL** |
+| Tests    | Aesthetics     | Final Verdict |
+|----------|----------------|---------------|
+| All pass | PASS / N/A     | **PASS**      |
+| All pass | FAIL           | **FAIL**      |
+| Any fail | —              | **FAIL**      |
 
 Write the acceptance report to `.cc-claude-codex/status.md` verification table, linking each row to the specific Scenario verified.
 
@@ -180,14 +194,14 @@ See `references/hooks-config.md` for details.
 
 ## Key Rules
 
-1. **Never skip review** — Always verify with `git diff`, even if Codex says done
-2. **Define intent, not implementation** — Progress steps specify what to achieve and where, not how. Give Codex clear goals and boundaries; let it decide the approach.
-3. **Structure requirements with scenarios** — Every requirement in `status.md` uses Requirement + Scenario (Given/When/Then). This makes acceptance criteria explicit from the start and review traceable at the end.
-4. **Inject project conventions** — Codex is stateless. Always include tech stack, patterns, and relevant file references in `codex-progress.md`. Without this context, Codex will guess and likely diverge from project norms.
-5. **Batch large tasks** — Limit each Codex run to 1-3 tightly related subtasks
-6. **Treat `status.md` as truth** — Update per step so compact does not lose context
-7. **Know when to stop** — On unrecoverable errors or retry limit, mark `🛑 Aborted` and escalate
-8. **Three-pillar acceptance must pass** — Code review (with `file:line` evidence), functional testing (independent verification), and product aesthetics. Any pillar FAIL means overall FAIL.
-9. **Commit after every PASS batch** — Keep each successful round rollback-safe
-10. **`codex-progress.md` exists = active work** — Delete after PASS, update and rerun after FAIL
-11. **Product aesthetics are non-negotiable** — Do not pass work that merely functions. Evaluate craft quality, interaction elegance, and information hierarchy from a discerning PM's perspective.
+1. **Never modify implementation code directly** — All code changes go through Codex. Claude Code reads, analyzes, and tests — never writes implementation code. If code needs fixing, update `codex-progress.md` and re-run Codex.
+2. **Never skip test verification** — Always run tests to verify, even if Codex says done
+3. **Define intent, not implementation** — Progress steps specify what to achieve and where, not how. Give Codex clear goals and boundaries; let it decide the approach.
+4. **Structure requirements with scenarios** — Every requirement in `status.md` uses Requirement + Scenario (Given/When/Then). This makes acceptance criteria explicit from the start and review traceable at the end.
+5. **Inject project conventions** — Codex is stateless. Always include tech stack, patterns, and relevant file references in `codex-progress.md`. Without this context, Codex will guess and likely diverge from project norms.
+6. **Batch large tasks** — Limit each Codex run to 1-3 tightly related subtasks
+7. **Treat `status.md` as truth** — Update per step so compact does not lose context
+8. **Know when to stop** — On unrecoverable errors or retry limit, mark `🛑 Aborted` and escalate
+9. **Test-based acceptance only** — Unit tests, E2E tests, and integration tests are the sole acceptance criteria. Do not review code implementation quality, style, or structure. Only test outcomes determine PASS/FAIL.
+10. **Commit after every PASS batch** — Keep each successful round rollback-safe
+11. **`codex-progress.md` exists = active work** — Delete after PASS, update and rerun after FAIL

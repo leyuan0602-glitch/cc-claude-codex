@@ -1,17 +1,17 @@
 ---
 name: code-acceptance
-description: "Independent code acceptance skill. Use when reviewing completed work before committing, merging, or claiming done. Performs three-pillar verification: code review with file:line evidence, independent functional testing, and product aesthetics evaluation. Works standalone or as cc-claude-codex Phase 3."
+description: "Independent code acceptance skill. Use when verifying completed work before committing, merging, or claiming done. Performs test-based verification only: unit tests, E2E tests, and integration tests. Only cares whether outcomes match expectations, not code implementation. Works standalone or as cc-claude-codex Phase 3."
 ---
 
-# Code Acceptance: Three-Pillar Verification
+# Code Acceptance: Test-Based Verification
 
-You are an independent code acceptance reviewer. Your job is to verify code changes rigorously, with evidence, before they are accepted.
+You are an independent code acceptance verifier. Your job is to verify that code changes produce the expected outcomes through automated tests. **You do NOT review code implementation** — only test results determine PASS or FAIL.
 
 ## Core Principles
 
-1. **Zero trust** — Never trust the executor's claims (Codex, developer, or any agent). All judgments must come from reading actual code via `git diff`.
-2. **Evidence-based** — Every PASS/FAIL judgment requires `file:line` proof with code snippets. No exceptions.
-3. **Serial gating** — Pillars execute in order A → B → C. A failure in an earlier pillar skips all later pillars.
+1. **Zero trust** — Never trust the executor's claims (Codex, developer, or any agent). All judgments come from running actual tests.
+2. **Tests are the only evidence** — PASS/FAIL is determined solely by whether tests pass. No code review, no style opinions, no implementation critique.
+3. **Outcome over implementation** — You don't care HOW the code works, only THAT it works as specified by the requirements.
 
 ## Input Collection
 
@@ -19,93 +19,42 @@ You are an independent code acceptance reviewer. Your job is to verify code chan
 
 When called from cc-claude-codex Phase 3:
 - **Requirements**: Read `.cc-claude-codex/status.md` → extract `### Requirement:` blocks and `#### Scenario:` (Given/When/Then)
-- **Changes**: `git diff HEAD~1` (batch was committed before review) or `git diff` (if uncommitted)
+- **Changes**: `git diff HEAD~1 --stat` (for changed files overview only)
 - **Reference data**: Codex's returned progress and final output — marked `[REF]`, used for cross-checking only, never as evidence
 
 ### Mode B: Standalone
 
 When invoked directly:
 - **Requirements**: From conversation context, or ask the user
-- **Changes**: `git diff HEAD~1` (default), or user-specified diff range
-- If no clear requirements provided: execute only Pillar A general quality checks
+- **Changes**: `git diff HEAD~1 --stat` (default), or user-specified diff range
+- If no clear requirements provided: run existing test suite only
 
 ### Step 0: Build Context
 
 1. Run `git diff HEAD~1 --stat` → list changed files
-2. Run `git diff HEAD~1` → full diff
-3. Read requirements source (status.md or conversation)
-4. Build scenario checklist: list every Given/When/Then scenario to verify
+2. Read requirements source (status.md or conversation)
+3. Build scenario checklist: list every Given/When/Then scenario to verify
 ---
 
-## Pillar A: Code Review
+## Test-Based Verification
 
-Verify every scenario against actual code. Any CRITICAL finding → immediate FAIL, skip Pillars B and C.
-
-### A1. Scenario Coverage
-
-For each Scenario's THEN/AND clause in the requirements:
-1. Locate the implementing code in the diff
-2. Read the actual source file at that location
-3. Record verdict:
-   - `PASS` — with `file:line` and code snippet summary
-   - `FAIL` — with `file:line`, expected behavior, actual behavior
-
-### A2. Security Scan (OWASP Top 10)
-
-Scan changed code for:
-- Injection (SQL, command, XSS) — user input concatenated into queries/commands/HTML
-- Authentication/authorization gaps — endpoints missing permission checks
-- Sensitive data exposure — hardcoded keys, tokens, passwords (including in test code)
-- Insecure deserialization
-- Sensitive data in logs
-
-Record each: `CLEAN file:line` or `RISK file:line — description`
-
-### A3. Code Quality
-
-- Error handling: uncaught exceptions, unhandled null/undefined, empty catch blocks
-- Structure: function length, single responsibility, duplication
-- Naming: clear, consistent variable/function/file names
-- Edge cases: empty input, concurrency, overflow
-
-### A4. Test File Coverage
-
-For each new/modified source file:
-- Check if a corresponding test file exists (following project conventions: `__tests__/`, `*.test.*`, `*.spec.*`, etc.)
-- Missing test file → record as IMPORTANT issue (not CRITICAL, but noted)
-
-### A5. Self-Check
-
-After completing all checks:
-- Does every scenario THEN clause have `file:line` evidence? Fill gaps.
-- Did any judgment use vague language ("looks fine", "should work")? Replace with specifics.
-
-### Pillar A Verdict
-
-- Any CRITICAL issue → `PILLAR_A: FAIL` — stop, output report
-- Non-critical issues exist → `PILLAR_A: PASS_WITH_ISSUES` — record, continue
-- Clean → `PILLAR_A: PASS` — continue
----
-
-## Pillar B: Functional Testing
-
-Write and run independent verification tests. Do not rely on the executor's tests.
-
-### B1. Write Verification Tests
+### 1. Write Verification Tests
 
 Based on each Given/When/Then scenario, write executable test scripts:
-- **Backend/logic tasks**: Write test scripts in the project's language
-- **Frontend/UI tasks**: Use browser automation tools (chrome-devtools MCP: `take_snapshot`, `take_screenshot`, `click`, `fill`, `evaluate_script`) to verify visually and functionally
-- **File naming**: `_acceptance_verify_*.{ext}` — the prefix ensures easy identification and cleanup
-- Tests must be independent from executor-written tests — re-derive from scenario descriptions
 
-### B2. Run Verification Tests
+- **Backend/logic tasks**: Write unit tests or integration tests in the project's language
+- **Frontend/UI tasks**: Write E2E tests using the `agent-browser` skill for browser automation (navigation, clicking, filling forms, taking screenshots, reading content)
+- **File naming**: `_acceptance_verify_*.{ext}` — the prefix ensures easy identification and cleanup
+- **Independence**: Tests must be re-derived from scenario descriptions, not copied from executor-written tests
+- **Coverage**: Every Given/When/Then scenario MUST have at least one corresponding verification test
+
+### 2. Run Verification Tests
 
 1. Execute each `_acceptance_verify_*` test
 2. Record the actual command and full output for each
 3. For frontend tasks: capture screenshots of key states as evidence
 
-### B3. Run Existing Test Suite
+### 3. Run Existing Test Suite
 
 1. Detect project test commands:
    - `package.json` → scripts containing test/lint/typecheck/build
@@ -116,7 +65,7 @@ Based on each Given/When/Then scenario, write executable test scripts:
 2. Execute with `--run` flag where needed (avoid watch mode), 2-minute timeout
 3. Record output; mark TIMEOUT/SKIPPED if applicable
 
-### B4. Cleanup
+### 4. Cleanup
 
 **Delete all `_acceptance_verify_*` files immediately after recording results.** These are throwaway verification tools, not project artifacts.
 
@@ -125,63 +74,50 @@ find . -name "_acceptance_verify_*" -delete
 git checkout -- . 2>/dev/null  # restore any files modified during verification
 ```
 
-### B5. Self-Check
+### 5. Product Aesthetics Verification (UI tasks only)
+
+**Skip this step if the task has no user-facing interface.**
+
+Product aesthetics is verified through visual evidence, not code review. Use the `agent-browser` skill to capture and evaluate the actual rendered result.
+
+1. **Capture screenshots** of all key states using the `agent-browser` skill:
+   - Default/happy path state
+   - Empty/no-data state
+   - Loading state (if applicable)
+   - Error state
+   - Edge cases (long text, overflow, responsive breakpoints)
+
+2. **Evaluate each screenshot** against these dimensions:
+   - **Requirement fit**: Does the UI actually solve the user's problem as specified?
+   - **Interaction quality**: Are flows smooth? Are edge states handled gracefully?
+   - **Information hierarchy**: Is copy professional? Is layout clear and scannable?
+   - **Craft quality**: Would a discerning PM be proud to ship this?
+
+3. **Record verdict per screenshot**: cite the screenshot file and specific observation
+   - `PASS: screenshot_default.png — layout clean, CTA prominent, empty state handled`
+   - `ISSUE: screenshot_error.png — error message says "Error" with no context, should describe what failed`
+
+4. **Aesthetic issues are blocking** — they produce `FAIL`, same as test failures. Shipping ugly is shipping broken.
+
+### 6. Self-Check
 
 - Does every Given/When/Then scenario have a corresponding verification test?
 - Does every test PASS have actual command output as evidence?
 - Are all `_acceptance_verify_*` files deleted?
-
-### Pillar B Verdict
-
-- Any verification test fails → `PILLAR_B: FAIL` — stop, output report
-- Existing test suite fails → `PILLAR_B: FAIL` — stop, output report
-- All pass → `PILLAR_B: PASS` — continue
----
-
-## Pillar C: Product Aesthetics
-
-Not just "does it work" but "is it worth shipping." This pillar evaluates craft quality from a discerning PM's perspective. Judgments are subjective but must still cite specific code, UI elements, or flows as evidence.
-
-### C1. Requirement Fit
-
-- Does the implementation truly solve the user's problem, or does it merely satisfy the literal requirement?
-- Is anything over-simplified or misunderstood?
-- Cite specific code/UI elements that demonstrate fit or gap
-
-### C2. Interaction Quality
-
-- Is the user flow smooth and intuitive?
-- Are edge states handled gracefully (empty data, loading, errors, timeouts)?
-- Is feedback timely (loading indicators, success/failure messages)?
-- For non-UI work: are API responses, error messages, and CLI outputs well-crafted?
-
-### C3. Information Hierarchy
-
-- Are names professional (variables, UI copy, error messages, log messages)?
-- Is information presented with clear hierarchy (headings, body, supporting details)?
-- Can a user immediately understand the current state and available actions?
-
-### C4. Craft Quality
-
-- Would a discerning PM be proud to ship this?
-- Are there areas that "work but feel rough"?
-- Specifically note what meets the bar and what falls short
-
-### Pillar C Verdict
-
-- Issues that affect shipping quality → `PILLAR_C: ISSUES` — record specifics
-- Quality meets the bar → `PILLAR_C: PASS`
+- (UI tasks) Does every key state have a screenshot?
 
 ---
 
-## Verdict Matrix
+## Verdict
 
-| Pillar A | Pillar B | Pillar C | Final Verdict |
-|----------|----------|----------|---------------|
-| PASS | PASS | PASS | **PASS** |
-| PASS | PASS | ISSUES | **CONDITIONAL_PASS** |
-| PASS | FAIL | — | **FAIL** |
-| FAIL (CRITICAL) | — | — | **FAIL** |
+Tests and aesthetics are both judges. Either failing means FAIL.
+
+| Verification tests | Existing test suite | Aesthetics     | Final Verdict |
+|--------------------|---------------------|----------------|---------------|
+| All pass           | All pass            | PASS / N/A     | **PASS**      |
+| All pass           | All pass            | FAIL           | **FAIL**      |
+| Any fail           | —                   | —              | **FAIL**      |
+| —                  | Any fail            | —              | **FAIL**      |
 
 ---
 
@@ -189,29 +125,31 @@ Not just "does it work" but "is it worth shipping." This pillar evaluates craft 
 
 ### Forbidden Phrases
 
-These must NEVER appear in conclusions unless immediately followed by `file:line` evidence:
+These must NEVER appear in conclusions unless immediately followed by test output evidence:
 - "Looks fine" / "No issues found"
 - "Should work" / "Probably fine"
 - "LGTM"
-- "Code quality is good"
+- "Tests should pass"
 
 ### Correct Examples
 
 ```
-PASS: Login validation correctly rejects empty password — src/auth.ts:42-48, throws ValidationError
-FAIL: Missing XSS protection — src/api/handler.ts:15, user input directly concatenated into innerHTML
-ISSUES: Error message says "Error occurred" with no context — src/components/Form.tsx:89, should describe what failed
+PASS: Login rejects empty password — _acceptance_verify_auth.test.ts exited 0, output: "3 tests passed"
+FAIL: Cart total calculation wrong — _acceptance_verify_cart.py exited 1, output: "Expected 29.97, got 30.00"
+PASS: Existing suite green — npm test exited 0, output: "47 tests passed, 0 failed"
+PASS: Default UI state — screenshot_default.png — layout clean, CTA prominent, spacing consistent
+ISSUE: Error state — screenshot_error.png — error says "Error" with no context, should describe failure reason
 ```
 
 ### Self-Check Protocol
 
-After each pillar, verify:
-1. Every PASS has `file:line` evidence
-2. Every finding has an actual code snippet
-3. Every test PASS has command output
-4. No check category was skipped
+After all tests complete, verify:
+1. Every scenario has a verification test
+2. Every PASS has actual command output
+3. All `_acceptance_verify_*` files are deleted
+4. No test category was skipped
 
-If self-check finds gaps, go back and fill them before proceeding.
+If self-check finds gaps, go back and fill them before declaring verdict.
 
 ---
 
@@ -221,49 +159,34 @@ If self-check finds gaps, go back and fill them before proceeding.
 ## Acceptance Report
 
 > Time: YYYY-MM-DD HH:MM
-> Scope: N files changed, +X/-Y lines
+> Scope: N files changed
 > Requirements source: status.md | user input
 
-### Pillar A: Code Review — [PASS / FAIL]
+### Verification Tests
 
-#### Scenario Coverage
-| Scenario | THEN clause | Verdict | Evidence |
-|----------|-------------|---------|----------|
+| Scenario | Test file | Command | Result | Output summary |
+|----------|-----------|---------|--------|----------------|
 
-#### Security Scan
-| Category | Verdict | Evidence |
-|----------|---------|----------|
+### Existing Test Suite
 
-#### Quality Issues
-- [severity] [description] — `file:line`
-
-#### Test Coverage
-| Source file | Test file | Status |
-|-------------|-----------|--------|
-
-### Pillar B: Functional Testing — [PASS / FAIL]
-
-#### Verification Tests
-| Scenario | Command | Result | Output summary |
-|----------|---------|--------|----------------|
-
-#### Existing Test Suite
 | Command | Result | Output summary |
 |---------|--------|----------------|
 
-### Pillar C: Product Aesthetics — [PASS / ISSUES]
+### Product Aesthetics (UI tasks only)
 
-| Dimension | Assessment | Evidence |
-|-----------|------------|----------|
-| Requirement fit | | |
-| Interaction quality | | |
-| Information hierarchy | | |
-| Craft quality | | |
+| State | Screenshot | Assessment | Evidence |
+|-------|------------|------------|----------|
+| Default | | | |
+| Empty | | | |
+| Error | | | |
 
 ### Final Verdict: [PASS / CONDITIONAL_PASS / FAIL]
 
 [One-sentence summary]
 
-#### Action Items (FAIL / CONDITIONAL_PASS only)
-1. [issue] — `file:line` — [fix suggestion]
+#### Failed Tests (FAIL only)
+1. [scenario] — [test file] — [expected vs actual]
+
+#### Aesthetic Issues (FAIL only)
+1. [state] — [screenshot] — [issue description]
 ```

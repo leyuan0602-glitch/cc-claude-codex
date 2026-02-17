@@ -2,7 +2,7 @@
 
 这是一个 Agent skill：让 Claude Code 编排 Codex 完成复杂项目自动化，并通过 Markdown 文件进行可靠的状态跟踪。
 
-它充分利用 Claude Code 更好的审美与沟通能力来做规划和评审，同时发挥 Codex 准确的执行能力来完成实现。
+Claude Code 作为监督者（规划、基于测试的验收），Codex 负责所有代码实现。Claude Code 禁止直接修改实现代码。
 
 英文文档请见 `README.md`。
 
@@ -43,7 +43,7 @@ Claude Code 会自动创建并维护 `.cc-claude-codex/`，再调用 Codex 执�
 - “修复 API 返回 500 的 bug”
 - “把这个模块重构成 TypeScript”
 
-Claude Code 会自动执行完整流程：需求分析 -> Codex 执行 -> Review -> 提交。
+Claude Code 会自动执行完整流程：需求分析 -> Codex 执行 -> 测试验收 -> 提交。
 
 ### 手动调用 Codex
 
@@ -110,16 +110,16 @@ python ~/.claude/skills/cc-claude-codex/scripts/cc-claude-codex.py --max-timeout
 - **PreCompact**：compact 前自动快照 `status.md`
 - **SessionStart**：compact/startup/resume 后自动注入 `status.md`
 
-### Review 不可跳过
+### 验收基于测试，不做代码审查
 
-每轮 Codex 执行后，Claude Code 都必须用 `git diff` 做验证：
+每轮 Codex 执行后，Claude Code 通过自动化测试进行验收——不审查代码实现：
 
-- 功能是否满足验收标准
-- 文件改动范围是否准确
-- 代码质量与安全性
-- 如有测试，必须执行并通过
+- 根据 Given/When/Then 场景编写独立验证测试
+- 运行项目已有测试套件
+- UI 任务：通过 `agent-browser` skill 截图并评估产品美学
+- 任何测试失败或美学不达标 → FAIL，更新修复指引并重试
 
-如果不通过，需要更新修复指引并重试，直到通过或达到重试上限。
+Claude Code 禁止直接修改实现代码，所有修复都通过 Codex 完成。
 
 ## 配置
 

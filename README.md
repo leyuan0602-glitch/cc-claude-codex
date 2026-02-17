@@ -2,7 +2,7 @@
 
 Agent skill that lets Claude Code orchestrate Codex for complex project automation, using Markdown files for reliable state tracking.
 
-It combines Claude Code's stronger taste and communication for planning/review with Codex's precise execution for implementation.
+Claude Code acts as supervisor (planning, test-based acceptance) while Codex handles all code implementation. Claude Code never directly modifies implementation code.
 
 For Chinese documentation, see `README.zh-CN.md`.
 
@@ -42,7 +42,7 @@ Describe your development request directly in Claude Code. CC Claude Codex will 
 - "Fix the API 500 error"
 - "Refactor this module to TypeScript"
 
-Claude Code will run the full flow: analysis -> Codex execution -> review -> commit.
+Claude Code will run the full flow: analysis -> Codex execution -> test verification -> commit.
 
 ### Run Codex Manually
 
@@ -111,14 +111,14 @@ Claude Code hooks provide automated safeguards:
 
 ### Review Is Mandatory
 
-After every Codex run, Claude Code must validate with `git diff`:
+After every Codex run, Claude Code verifies through automated tests — not code review:
 
-- Functional completeness against acceptance criteria
-- File scope discipline
-- Code quality and safety
-- Test execution (if tests exist)
+- Write independent verification tests based on Given/When/Then scenarios
+- Run project's existing test suite
+- For UI tasks: capture screenshots and evaluate product aesthetics via the `agent-browser` skill
+- Any test failure or aesthetics failure → FAIL, retry with updated guidance
 
-If validation fails, update guidance and retry until pass or retry limit.
+Claude Code never directly modifies implementation code. All fixes go through Codex.
 
 ## Configuration
 
