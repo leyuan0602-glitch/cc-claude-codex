@@ -17,7 +17,7 @@ Claude Code may only:
 - Run git commands, test commands, and verification scripts
 - Write `_acceptance_verify_*` temporary test files (deleted after verification)
 
-If Codex fails and code needs fixing, update `codex-progress.md` with fix instructions and re-run Codex. **Never patch the code yourself.**
+If Codex fails and code needs fixing, update `codex-progress.md` with the failing test output and re-run Codex. **Never patch the code yourself, never diagnose root cause — let Codex debug.**
 
 ## File Responsibilities
 
@@ -142,8 +142,9 @@ Write the acceptance report to `.cc-claude-codex/status.md` verification table, 
 
 ### FAIL
 1. **Do not delete `codex-progress.md`**. Update it with:
-   - Which steps failed and exact issues (from acceptance report's `file:line` references)
-   - Fix instructions (including file paths/line hints and error details from the acceptance report)
+   - Which tests failed and the test output (error messages, expected vs actual, stack traces)
+   - **Do NOT diagnose root cause or locate buggy code** — that is Codex's job
+   - Simply pass the failing test name + output as-is, let Codex debug
 2. Re-run `cc-claude-codex.py` (Codex continues from updated progress)
 3. Retry by default until success or unrecoverable error
 4. If user defined max retries and limit is reached:
