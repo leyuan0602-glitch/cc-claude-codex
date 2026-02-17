@@ -60,16 +60,17 @@ Before each run:
      - *Acceptance:* observable outcome that proves the step is done
      - *Constraints:* project-specific rules for this step (optional, only when needed)
    - **Do not** write exact code or step-by-step implementation instructions. Codex is a capable model — give it clear goals and boundaries, let it decide the how.
-3. Invoke `cc-claude-codex.py`:
+3. Invoke `cc-claude-codex.py` using **background execution** (avoids Claude Code's 10-minute Bash timeout):
    ```bash
-   # Standard development
+   # Standard development (run with run_in_background: true)
    python ~/.claude/skills/cc-claude-codex/scripts/cc-claude-codex.py
 
-   # Read-only analysis
+   # Read-only analysis (run with run_in_background: true)
    python ~/.claude/skills/cc-claude-codex/scripts/cc-claude-codex.py --readonly
    ```
-4. `cc-claude-codex.py` instructs Codex to read `codex-progress.md`; Codex updates the file after each completed step
-5. Wait for return and collect three outputs: `exit_reason` + `codex-progress.md` content + final Codex output
+   **IMPORTANT**: Always set `run_in_background: true` when calling the Bash tool. This returns a `task_id` immediately.
+4. **Poll for completion**: Use `TaskOutput` with the returned `task_id` to check if Codex has finished. Use `block: true` with `timeout: 120000` (2 min) in a loop — if it times out, call `TaskOutput` again until the task completes.
+5. Once complete, collect three outputs from the task output: `exit_reason` + `codex-progress.md` content + final Codex output
 
 ## Phase 3: Independent Acceptance (Never Skip)
 
