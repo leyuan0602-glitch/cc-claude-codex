@@ -12,6 +12,12 @@
 
 **Tech Stack / Constraints:** Key technologies, patterns, and boundaries (e.g., "vanilla JS, no frameworks", "must use existing useQuery hook for API calls").
 
+### Infrastructure
+**Dev Server:** N/A
+**Docker Services:** N/A
+**Remote Target:** N/A
+**Health Endpoint:** N/A
+
 ## Requirements
 
 <!-- Each requirement is a distinct behavior the system must have. Use MUST/SHOULD/MAY (RFC 2119) to indicate priority. Every requirement needs at least one scenario. -->

@@ -44,8 +44,13 @@ Before each run:
    - **Goal / Context / Tech Stack** — concise project overview
    - **Requirements** — each as a `### Requirement:` block with normative language (MUST/SHOULD/MAY)
    - **Scenarios** — every requirement gets at least one `#### Scenario:` using Given/When/Then format. These become the acceptance criteria for review.
-3. Break requirements into subtasks. Each subtask must reference which Requirement > Scenario it covers, state its acceptance condition, and list its file scope
-4. If there are more than 5 subtasks, split into batches (1-3 per round)
+3. **Identify infrastructure needs** — determine if verification will require:
+   - Dev Server (detected from `package.json` dev/start/serve scripts)
+   - Docker services (detected from `docker-compose*.yml`)
+   - Remote target or health endpoint (from user request or deployment context)
+   - Write findings to `status.md` under `### Infrastructure` section (use N/A for unneeded items)
+4. Break requirements into subtasks. Each subtask must reference which Requirement > Scenario it covers, state its acceptance condition, and list its file scope
+5. If there are more than 5 subtasks, split into batches (1-3 per round)
 
 ## Phase 2: Codex Execution
 
@@ -86,6 +91,16 @@ Execute the `code-acceptance` test-based verification flow. **Do not review code
 2. Read `.cc-claude-codex/status.md` — extract current batch's Requirements and Scenarios (Given/When/Then)
 3. Mark Codex return data as `[REF]` for cross-checking only
 
+### 3.0.5 Infrastructure Setup
+
+Execute the `code-acceptance` Infrastructure Detection (Step 0.5) and Service Lifecycle protocol:
+
+1. Read `status.md` → `### Infrastructure` section to determine what's needed
+2. Scan project files to confirm: `package.json` scripts, `docker-compose*.yml`, etc.
+3. Start services in order: Docker first → Dev Server second (both with `run_in_background: true`)
+4. Poll for readiness using the timeout/interval table from `code-acceptance` Service Lifecycle
+5. **If any service fails to start → FAIL immediately** — do not proceed to tests. Record the background task output as failure evidence.
+
 ### 3A. Write Verification Tests
 
 - For each Given/When/Then scenario, write executable test scripts (`_acceptance_verify_*` files)
@@ -107,10 +122,15 @@ Execute the `code-acceptance` test-based verification flow. **Do not review code
 - Evaluate: requirement fit, interaction quality, information hierarchy, craft quality
 - Aesthetic issues produce `FAIL`, same as test failures — shipping ugly is shipping broken
 
-### 3D. Cleanup
+### 3D. Cleanup (Unconditional)
 
-- **Delete all `_acceptance_verify_*` files after recording results**
-- `git checkout -- . 2>/dev/null` to restore any files modified during verification
+Execute the full `code-acceptance` cleanup protocol — **always runs, regardless of PASS or FAIL**:
+
+1. Delete all `_acceptance_verify_*` files
+2. Kill Dev Server process (if started): `kill $PID` / `taskkill /F /PID`
+3. Tear down Docker (if started): `docker compose down -v --remove-orphans`
+4. Restore working tree: `git checkout -- . 2>/dev/null`
+5. Verify cleanup: no leftover verification files, no orphan processes on dev server port
 
 ### Anti-Hallucination Self-Check
 

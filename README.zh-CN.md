@@ -110,6 +110,19 @@ python ~/.claude/skills/cc-claude-codex/scripts/cc-claude-codex.py --max-timeout
 - **PreCompact**：compact 前自动快照 `status.md`
 - **SessionStart**：compact/startup/resume 后自动注入 `status.md`
 
+### 基础设施自动化
+
+Phase 3 验收会自动管理验证所需的基础设施：
+
+| 场景 | 启动 | 就绪检测 | 清理 |
+|------|------|----------|------|
+| Dev Server | 后台 `npm run dev` 等 | `curl` 轮询（60s 超时） | `kill` / `taskkill` |
+| Docker | 后台 `docker compose up` | 健康检查或 `curl`（90s） | `docker compose down -v` |
+| SSH 远程 | 无需启动 | `ssh` + `curl` 健康检查 | 无 |
+| 部署后验证 | 无需启动 | `curl` 轮询（180s） | 无 |
+
+基础设施需求从 `package.json` 脚本、`docker-compose*.yml` 和 `status.md` 的 `### Infrastructure` 节自动检测。服务按顺序启动（Docker → Dev Server），清理无条件反序执行。
+
 ### 验收基于测试，不做代码审查
 
 每轮 Codex 执行后，Claude Code 通过自动化测试进行验收——不审查代码实现：

@@ -34,6 +34,61 @@ When invoked directly:
 1. Run `git diff HEAD~1 --stat` → list changed files
 2. Read requirements source (status.md or conversation)
 3. Build scenario checklist: list every Given/When/Then scenario to verify
+
+### Step 0.5: Infrastructure Detection
+
+Scan the project to determine what infrastructure is needed for verification:
+
+1. **Detect requirements** — check these sources:
+   - `package.json` → `dev`, `start`, `serve` scripts → `NEEDS_DEV_SERVER`
+   - `docker-compose*.yml` exists → `NEEDS_DOCKER`
+   - `status.md` → `### Infrastructure` section → `Remote Target` / `Health Endpoint` populated → `NEEDS_REMOTE_VERIFY` / `NEEDS_HEALTH_POLL`
+2. **Output detection checklist** — record which flags are active before proceeding
+3. **If no infrastructure needed** — skip directly to Test-Based Verification
+
+---
+
+## Service Lifecycle
+
+All services follow the same three-step pattern: **Start → Wait Ready → Cleanup After Tests**.
+
+### Lifecycle Table
+
+| Scenario | Start (`run_in_background: true`) | Ready Check | Cleanup |
+|----------|-----------------------------------|-------------|---------|
+| Dev Server | `npm run dev` / `python manage.py runserver` / etc. | `curl -sf http://localhost:PORT/` poll | `kill $PID` / `taskkill /F /PID` |
+| Docker | `docker compose up` | `docker compose ps` health or `curl` port | `docker compose down -v --remove-orphans` |
+| SSH Remote | N/A (read-only) | `ssh USER@HOST "curl -sf localhost:PORT/health"` | N/A |
+| Post-deploy | N/A (read-only) | `curl -sf ENDPOINT` poll (longer timeout) | N/A |
+
+### Ready Polling
+
+Generic polling logic — retry up to N attempts, sleep M seconds between each:
+
+| Scenario | Timeout | Interval | Max Attempts |
+|----------|---------|----------|--------------|
+| Dev Server | 60s | 2s | 30 |
+| Docker | 90s | 3s | 30 |
+| Post-deploy | 180s | 5s | 36 |
+
+On timeout: read the background task output (`TaskOutput`) to diagnose the startup failure. Report as infrastructure FAIL — do not proceed to tests.
+
+### Cross-Platform Notes
+
+Claude Code Bash runs in Git Bash on Windows — most Unix commands work. Platform-specific alternatives:
+
+- Kill process: `kill $PID` (Unix) / `taskkill /F /PID $PID` (Windows)
+- Find port owner: `lsof -ti :PORT` (Unix) / `netstat -ano | findstr :PORT` (Windows)
+
+### Orchestration Order
+
+1. Docker services start first (`docker compose up` in background)
+2. Dev Server starts second (in background)
+3. Wait for all services to be ready (poll in parallel if possible)
+4. Run tests
+5. Cleanup in reverse order: Dev Server → Docker
+6. **Cleanup is unconditional** — execute even if tests fail or error out
+
 ---
 
 ## Test-Based Verification
@@ -65,14 +120,29 @@ Based on each Given/When/Then scenario, write executable test scripts:
 2. Execute with `--run` flag where needed (avoid watch mode), 2-minute timeout
 3. Record output; mark TIMEOUT/SKIPPED if applicable
 
-### 4. Cleanup
+### 4. Cleanup (Unconditional)
 
-**Delete all `_acceptance_verify_*` files immediately after recording results.** These are throwaway verification tools, not project artifacts.
+**Always execute cleanup, regardless of PASS or FAIL.** No exceptions.
 
-```
-find . -name "_acceptance_verify_*" -delete
-git checkout -- . 2>/dev/null  # restore any files modified during verification
-```
+Cleanup sequence (in order):
+
+1. **Delete verification files**:
+   ```
+   find . -name "_acceptance_verify_*" -delete
+   ```
+2. **Kill Dev Server** (if started):
+   ```
+   kill $DEV_SERVER_PID 2>/dev/null || taskkill /F /PID $DEV_SERVER_PID 2>/dev/null
+   ```
+3. **Tear down Docker** (if started):
+   ```
+   docker compose down -v --remove-orphans 2>/dev/null
+   ```
+4. **Restore working tree**:
+   ```
+   git checkout -- . 2>/dev/null
+   ```
+5. **Verify cleanup** — confirm no leftover `_acceptance_verify_*` files, no orphan background processes on the dev server port
 
 ### 5. Product Aesthetics Verification (UI tasks only)
 

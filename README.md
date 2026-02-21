@@ -109,6 +109,19 @@ Claude Code hooks provide automated safeguards:
 - **PreCompact**: Snapshot `status.md` before context compact
 - **SessionStart**: Inject `status.md` after compact/startup/resume
 
+### Infrastructure Automation
+
+Phase 3 acceptance automatically manages infrastructure needed for verification:
+
+| Scenario | Start | Ready Check | Cleanup |
+|----------|-------|-------------|---------|
+| Dev Server | Background `npm run dev` etc. | `curl` poll (60s timeout) | `kill` / `taskkill` |
+| Docker | Background `docker compose up` | Health check or `curl` (90s) | `docker compose down -v` |
+| SSH Remote | N/A | `ssh` + `curl` health | N/A |
+| Post-deploy | N/A | `curl` poll (180s) | N/A |
+
+Infrastructure needs are detected from `package.json` scripts, `docker-compose*.yml`, and `status.md`'s `### Infrastructure` section. Services start in order (Docker → Dev Server), cleanup runs unconditionally in reverse.
+
 ### Review Is Mandatory
 
 After every Codex run, Claude Code verifies through automated tests — not code review:
