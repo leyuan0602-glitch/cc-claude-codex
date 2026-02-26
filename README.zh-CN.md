@@ -14,6 +14,7 @@ Claude Code 作为监督者（规划、基于测试的验收），Codex 负责�
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI
 - [Codex](https://github.com/openai/codex) CLI（`npm i -g @openai/codex`）
+- [OpenCode](https://opencode.ai) CLI（`npm i -g opencode-ai`）— 可选，用于多 Agent 验证
 - Python 3.8+
 
 ## 快速开始
@@ -67,6 +68,7 @@ python ~/.claude/skills/cc-claude-codex/scripts/cc-claude-codex.py --max-timeout
 |-- SKILL.md
 |-- scripts/
 |   |-- cc-claude-codex.py
+|   |-- multi_agent_verify.py
 |   |-- setup.py
 |   |-- stop_check.py
 |   |-- pre_compact.py
@@ -74,7 +76,12 @@ python ~/.claude/skills/cc-claude-codex/scripts/cc-claude-codex.py --max-timeout
 |-- references/
 |   |-- hooks-config.md
 |   |-- status-template.md
-|   `-- progress-template.md
+|   |-- progress-template.md
+|   `-- verify-agent-prompt.md
+|-- multi-agent-verify/
+|   `-- SKILL.md
+|-- code-acceptance/
+|   `-- SKILL.md
 `-- docs/
     `-- images/
         |-- workflow-en.png
@@ -112,27 +119,18 @@ python ~/.claude/skills/cc-claude-codex/scripts/cc-claude-codex.py --max-timeout
 
 ### 基础设施自动化
 
-Phase 3 验收会自动管理验证所需的基础设施：
+Phase 3 验证使用 `multi-agent-verify`，启动3个独立 CLI agent（OpenCode、Codex、Claude Code）在各自的 git worktree 中并行工作。每个 agent 独立审查代码、编写测试、运行 E2E 验证并修复 bug。主 Agent 综合所有发现，在原分支上应用最终修复。
 
-| 场景 | 启动 | 就绪检测 | 清理 |
-|------|------|----------|------|
-| Dev Server | 后台 `npm run dev` 等 | `curl` 轮询（60s 超时） | `kill` / `taskkill` |
-| Docker | 后台 `docker compose up` | 健康检查或 `curl`（90s） | `docker compose down -v` |
-| SSH 远程 | 无需启动 | `ssh` + `curl` 健康检查 | 无 |
-| 部署后验证 | 无需启动 | `curl` 轮询（180s） | 无 |
+未安装的 agent 会自动跳过——只有 `claude` 是必需的。
 
-基础设施需求从 `package.json` 脚本、`docker-compose*.yml` 和 `status.md` 的 `### Infrastructure` 节自动检测。服务按顺序启动（Docker → Dev Server），清理无条件反序执行。
+### 验证取代代码审查
 
-### 验收基于测试，不做代码审查
+所有 Codex 批次完成后，Claude Code 运行多 Agent 验证，而非手动测试验收：
 
-每轮 Codex 执行后，Claude Code 通过自动化测试进行验收——不审查代码实现：
-
-- 根据 Given/When/Then 场景编写独立验证测试
-- 运行项目已有测试套件
-- UI 任务：通过 `agent-browser` skill 截图并评估产品美学
-- 任何测试失败或美学不达标 → FAIL，更新修复指引并重试
-
-Claude Code 禁止直接修改实现代码，所有修复都通过 Codex 完成。
+- 3个 agent 并行工作，各自在独立 worktree 中
+- 每个 agent：代码审查 → 写测试 → 跑测试 → E2E 验证 → 修 bug → commit
+- 主 Agent 收集所有 diff，综合修复，在原分支应用最终修复
+- 所有临时 worktree 无条件清理
 
 ## 配置
 
@@ -144,6 +142,15 @@ Claude Code 禁止直接修改实现代码，所有修复都通过 Codex 完成�
 | `--max-timeout` | 0 | 硬超时（秒，0 表示无限） |
 | `--stale-timeout` | 120 | 无日志活动超时秒数 |
 | `--sandbox` | 未设置 | 覆盖沙箱模式 |
+
+### `multi_agent_verify.py` 参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--worktree-base` | 必填 | worktree 父目录 |
+| `--timestamp` | 必填 | worktree 名称的时间戳后缀 |
+| `--prompt-file` | 必填 | 填充后的 prompt 文件路径 |
+| `--check-interval` | 900 | 状态检查间隔（秒） |
 
 ### 手动配置 Hooks
 

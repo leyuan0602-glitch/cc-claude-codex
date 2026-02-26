@@ -14,6 +14,7 @@ For Chinese documentation, see `README.zh-CN.md`.
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI
 - [Codex](https://github.com/openai/codex) CLI (`npm i -g @openai/codex`)
+- [OpenCode](https://opencode.ai) CLI (`npm i -g opencode-ai`) — optional, for multi-agent verification
 - Python 3.8+
 
 ## Quickstart
@@ -66,6 +67,7 @@ python ~/.claude/skills/cc-claude-codex/scripts/cc-claude-codex.py --max-timeout
 |-- SKILL.md
 |-- scripts/
 |   |-- cc-claude-codex.py
+|   |-- multi_agent_verify.py
 |   |-- setup.py
 |   |-- stop_check.py
 |   |-- pre_compact.py
@@ -73,7 +75,12 @@ python ~/.claude/skills/cc-claude-codex/scripts/cc-claude-codex.py --max-timeout
 |-- references/
 |   |-- hooks-config.md
 |   |-- status-template.md
-|   `-- progress-template.md
+|   |-- progress-template.md
+|   `-- verify-agent-prompt.md
+|-- multi-agent-verify/
+|   `-- SKILL.md
+|-- code-acceptance/
+|   `-- SKILL.md
 `-- docs/
     `-- images/
         |-- workflow-en.png
@@ -111,27 +118,18 @@ Claude Code hooks provide automated safeguards:
 
 ### Infrastructure Automation
 
-Phase 3 acceptance automatically manages infrastructure needed for verification:
+Phase 3 verification uses `multi-agent-verify` to spawn 3 independent CLI agents (OpenCode, Codex, Claude Code) in separate git worktrees. Each agent independently reviews code, writes tests, runs E2E verification, and fixes bugs. The main agent then synthesizes all findings and applies a final fix on the original branch.
 
-| Scenario | Start | Ready Check | Cleanup |
-|----------|-------|-------------|---------|
-| Dev Server | Background `npm run dev` etc. | `curl` poll (60s timeout) | `kill` / `taskkill` |
-| Docker | Background `docker compose up` | Health check or `curl` (90s) | `docker compose down -v` |
-| SSH Remote | N/A | `ssh` + `curl` health | N/A |
-| Post-deploy | N/A | `curl` poll (180s) | N/A |
+Agents that are not installed are automatically skipped — only `claude` is required.
 
-Infrastructure needs are detected from `package.json` scripts, `docker-compose*.yml`, and `status.md`'s `### Infrastructure` section. Services start in order (Docker → Dev Server), cleanup runs unconditionally in reverse.
+### Verification Replaces Code Review
 
-### Review Is Mandatory
+After all Codex batches are complete, Claude Code runs multi-agent verification instead of manual test-based acceptance:
 
-After every Codex run, Claude Code verifies through automated tests — not code review:
-
-- Write independent verification tests based on Given/When/Then scenarios
-- Run project's existing test suite
-- For UI tasks: capture screenshots and evaluate product aesthetics via the `agent-browser` skill
-- Any test failure or aesthetics failure → FAIL, retry with updated guidance
-
-Claude Code never directly modifies implementation code. All fixes go through Codex.
+- 3 agents work in parallel, each in its own worktree
+- Each agent: code review → write tests → run tests → E2E verify → fix bugs → commit
+- Main agent collects all diffs, synthesizes fixes, applies final fix on original branch
+- All temporary worktrees are cleaned up unconditionally
 
 ## Configuration
 
@@ -143,6 +141,15 @@ Claude Code never directly modifies implementation code. All fixes go through Co
 | `--max-timeout` | 0 | Hard timeout in seconds (0 = no limit) |
 | `--stale-timeout` | 120 | Kill when no log activity for N seconds |
 | `--sandbox` | unset | Override sandbox mode |
+
+### `multi_agent_verify.py` options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--worktree-base` | required | Parent directory for worktrees |
+| `--timestamp` | required | Timestamp suffix for worktree names |
+| `--prompt-file` | required | Path to the filled prompt file |
+| `--check-interval` | 900 | Status check interval in seconds |
 
 ### Manual Hook Configuration
 

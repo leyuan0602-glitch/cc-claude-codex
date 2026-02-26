@@ -77,79 +77,13 @@ Before each run:
 4. **Poll for completion**: Use `TaskOutput` with the returned `task_id` to check if Codex has finished. Use `block: true` with `timeout: 120000` (2 min) in a loop — if it times out, call `TaskOutput` again until the task completes.
 5. Once complete, collect three outputs from the task output: `exit_reason` + `codex-progress.md` content + final Codex output
 
-## Phase 3: Independent Acceptance (Never Skip)
+## Phase 3: Multi-Agent Verification (Never Skip)
 
-**"Completed" from Codex is not proof of completion. Only passing tests are proof.**
+**"Completed" from Codex is not proof of completion. Only independent verification is proof.**
 
-Codex returns three pieces of data: `exit_reason`, `codex-progress.md` content, and final Codex output. These are **reference only `[REF]`** — never use them as acceptance evidence.
+After ALL development batches are complete and committed, execute the `multi-agent-verify` skill for parallel verification. This launches 3 independent CLI agents (OpenCode, Codex, Claude Code) in separate git worktrees to independently review, test, and fix the code. You then synthesize their findings and apply a final fix on the original branch.
 
-Execute the `code-acceptance` test-based verification flow. **Do not review code implementation** — only test outcomes matter.
-
-### 3.0 Build Context
-
-1. Run `git diff HEAD~1 --stat` to get changed files overview
-2. Read `.cc-claude-codex/status.md` — extract current batch's Requirements and Scenarios (Given/When/Then)
-3. Mark Codex return data as `[REF]` for cross-checking only
-
-### 3.0.5 Infrastructure Setup
-
-Execute the `code-acceptance` Infrastructure Detection (Step 0.5) and Service Lifecycle protocol:
-
-1. Read `status.md` → `### Infrastructure` section to determine what's needed
-2. Scan project files to confirm: `package.json` scripts, `docker-compose*.yml`, etc.
-3. Start services in order: Docker first → Dev Server second (both with `run_in_background: true`)
-4. Poll for readiness using the timeout/interval table from `code-acceptance` Service Lifecycle
-5. **If any service fails to start → FAIL immediately** — do not proceed to tests. Record the background task output as failure evidence.
-
-### 3A. Write Verification Tests
-
-- For each Given/When/Then scenario, write executable test scripts (`_acceptance_verify_*` files)
-- Backend/logic: unit tests or integration tests in the project's language
-- Frontend/UI: E2E tests using the `agent-browser` skill for browser automation
-- Tests must be independent from executor-written tests — re-derive from scenario descriptions
-
-### 3B. Run All Tests (gate)
-
-- Execute all `_acceptance_verify_*` verification tests
-- Run project's existing test suite (detect from package.json, pyproject.toml, etc.)
-- Record actual command and full output for each
-- **Any test failure → FAIL**
-
-### 3C. Product Aesthetics (UI tasks only)
-
-- Skip if the task has no user-facing interface
-- Capture screenshots of all key states via the `agent-browser` skill
-- Evaluate: requirement fit, interaction quality, information hierarchy, craft quality
-- Aesthetic issues produce `FAIL`, same as test failures — shipping ugly is shipping broken
-
-### 3D. Cleanup (Unconditional)
-
-Execute the full `code-acceptance` cleanup protocol — **always runs, regardless of PASS or FAIL**:
-
-1. Delete all `_acceptance_verify_*` files
-2. Kill Dev Server process (if started): `kill $PID` / `taskkill /F /PID`
-3. Tear down Docker (if started): `docker compose down -v --remove-orphans`
-4. Restore working tree: `git checkout -- . 2>/dev/null`
-5. Verify cleanup: no leftover verification files, no orphan processes on dev server port
-
-### Anti-Hallucination Self-Check
-
-After testing, verify:
-- Every scenario has a corresponding verification test
-- Every test PASS has actual command output as evidence
-- All `_acceptance_verify_*` files are deleted
-- (UI tasks) Every key state has a screenshot
-- No forbidden phrases used without evidence ("looks fine", "should work", "LGTM")
-
-### Verdict
-
-| Tests    | Aesthetics     | Final Verdict |
-|----------|----------------|---------------|
-| All pass | PASS / N/A     | **PASS**      |
-| All pass | FAIL           | **FAIL**      |
-| Any fail | —              | **FAIL**      |
-
-Write the acceptance report to `.cc-claude-codex/status.md` verification table, linking each row to the specific Scenario verified.
+See `multi-agent-verify/SKILL.md` for the full workflow (Phase V1–V5).
 
 ## Phase 4: Decision
 
@@ -157,9 +91,9 @@ Write the acceptance report to `.cc-claude-codex/status.md` verification table, 
 1. Update `.cc-claude-codex/status.md` (mark completed items `[x]`, refresh timestamp, append Codex execution log)
 2. Commit batch changes: `git add -A && git commit -m "cc-claude-codex: <batch-summary>"`
 3. **Delete `.cc-claude-codex/codex-progress.md`**
-4. If CONDITIONAL_PASS: record aesthetic issues in `status.md` Known Issues section for future improvement
-5. If more batches remain, return to Phase 2
-6. When everything is complete, report a final summary to user
+4. If more batches remain, return to Phase 2
+5. When ALL batches are complete, execute Phase 3 (Multi-Agent Verification)
+6. After verification completes, report a final summary to user
 
 ### FAIL
 1. **Do not delete `codex-progress.md`**. Update it with:
@@ -217,13 +151,12 @@ See `references/hooks-config.md` for details.
 ## Key Rules
 
 1. **Never modify implementation code directly** — All code changes go through Codex. Claude Code reads, analyzes, and tests — never writes implementation code. If code needs fixing, update `codex-progress.md` and re-run Codex.
-2. **Never skip test verification** — Always run tests to verify, even if Codex says done
+2. **Never skip verification** — After all batches complete, always run `multi-agent-verify` before declaring done
 3. **Define intent, not implementation** — Progress steps specify what to achieve and where, not how. Give Codex clear goals and boundaries; let it decide the approach.
 4. **Structure requirements with scenarios** — Every requirement in `status.md` uses Requirement + Scenario (Given/When/Then). This makes acceptance criteria explicit from the start and review traceable at the end.
 5. **Inject project conventions** — Codex is stateless. Always include tech stack, patterns, and relevant file references in `codex-progress.md`. Without this context, Codex will guess and likely diverge from project norms.
 6. **Batch large tasks** — Limit each Codex run to 1-3 tightly related subtasks
 7. **Treat `status.md` as truth** — Update per step so compact does not lose context
 8. **Know when to stop** — On unrecoverable errors or retry limit, mark `🛑 Aborted` and escalate
-9. **Test-based acceptance only** — Unit tests, E2E tests, and integration tests are the sole acceptance criteria. Do not review code implementation quality, style, or structure. Only test outcomes determine PASS/FAIL.
-10. **Commit after every PASS batch** — Keep each successful round rollback-safe
-11. **`codex-progress.md` exists = active work** — Delete after PASS, update and rerun after FAIL
+9. **Commit after every batch** — Each batch commits directly without review; verification happens once at the end via `multi-agent-verify`
+10. **`codex-progress.md` exists = active work** — Delete after PASS, update and rerun after FAIL

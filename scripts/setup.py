@@ -55,6 +55,17 @@ def copy_skill(src: Path, dest: Path):
             if f.is_file():
                 shutil.copy2(f, acceptance_dest / f.name)
 
+    # Copy multi-agent-verify/ skill
+    verify_src = src / "multi-agent-verify"
+    if verify_src.exists():
+        verify_dest = dest.parent / "multi-agent-verify"
+        if verify_dest.exists():
+            shutil.rmtree(verify_dest)
+        verify_dest.mkdir(parents=True, exist_ok=True)
+        for f in verify_src.iterdir():
+            if f.is_file():
+                shutil.copy2(f, verify_dest / f.name)
+
 
 def generate_hooks_config(skill_dir: Path) -> dict:
     """Generate hooks JSON config with platform-correct paths."""
@@ -150,10 +161,11 @@ def main():
     copy_skill(src, skill_dir)
     print("  Skill files copied.")
 
-    if shutil.which("codex"):
-        print("  codex found in PATH.")
-    else:
-        print("  Warning: 'codex' not found in PATH. Install: npm i -g @openai/codex", file=sys.stderr)
+    for tool in ("codex", "opencode", "claude"):
+        if shutil.which(tool):
+            print(f"  {tool} found in PATH.")
+        else:
+            print(f"  Warning: '{tool}' not found in PATH.", file=sys.stderr)
 
     # Auto-merge hooks into settings.json
     settings_file = Path.home() / ".claude" / "settings.json"
