@@ -1,314 +1,310 @@
 #!/usr/bin/env python3
-"""Multi-Agent Verify: Orchestrate 3 CLI agents in parallel worktrees.
+"""Multi-agent verification orchestrator.
 
-Launches OpenCode, Codex, and Claude Code in separate git worktrees,
-each performing independent verification. Monitors all agents, writes
-periodic status to verify-status.json, and outputs a JSON report when
-all agents complete.
+Launches OpenCode and Codex CLI agents in separate worktrees,
+monitors their progress, enforces timeouts, and collects results.
+
+Claude agent is NOT managed here — it runs via Task tool with
+isolation: "worktree" directly from the main agent.
 
 Usage:
     python multi_agent_verify.py \
-        --worktree-base .claude/worktrees \
-        --timestamp 20260226-143000 \
-        --prompt-file .cc-claude-codex/verify-prompt-20260226-143000.md
+        --repo-root /path/to/repo \
+        --timestamp 20260228-020854 \
+        --prompt-file /path/to/prompt.md \
+        [--timeout 600]
 """
+
+from __future__ import annotations
 
 import argparse
 import json
-import platform
-import shutil
+import os
+import signal
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-
-IS_WINDOWS = platform.system() == "Windows"
-
-AGENTS = {
-    "opencode": {
-        "bin": "opencode",
-        "build_cmd": lambda b, pf, wt: [
-            b, "run",
-            "--model", "opencode/minimax-m2.5-free",
-            "--dir", str(wt),
-            "--format", "json",
-        ],
-        "prompt_via": "stdin",
-    },
-    "codex": {
-        "bin": "codex",
-        "build_cmd": lambda b, pf, wt: [
-            b, "exec",
-            "--sandbox", "danger-full-access" if IS_WINDOWS else "workspace-write",
-            "--json",
-        ],
-        "prompt_via": "arg",
-    },
-    "claude": {
-        "bin": "claude",
-        "build_cmd": lambda b, pf, wt: [
-            b, "-p",
-            "--output-format", "json",
-            "--permission-mode", "bypassPermissions",
-        ],
-        "prompt_via": "arg",
-    },
-}
+from typing import Any
 
 
-def configure_stdio():
-    """Avoid UnicodeEncodeError on non-UTF-8 consoles (e.g., Windows GBK)."""
-    for stream in (sys.stdout, sys.stderr):
-        reconfigure = getattr(stream, "reconfigure", None)
-        if callable(reconfigure):
-            try:
-                reconfigure(errors="replace")
-            except Exception:
-                pass
+@dataclass
+class AgentConfig:
+    name: str
+    cli_cmd: list[str]
+    worktree_dir: str = ""
 
 
-def write_status(status_file: Path, agents_status: dict):
-    """Write current agent status to JSON file."""
-    data = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "agents": agents_status,
-    }
-    status_file.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+@dataclass
+class AgentResult:
+    name: str
+    status: str = "pending"  # pending | running | completed | failed | timeout
+    exit_code: int | None = None
+    duration_seconds: float = 0.0
+    files_changed: int = 0
+    committed: bool = False
+    commit_hash: str = ""
+    error: str = ""
 
 
-def launch_agent(name: str, config: dict, prompt: str, worktree: Path, log_file: Path):
-    """Launch a single agent subprocess. Returns (proc, log_handle) or (None, None)."""
-    bin_path = shutil.which(config["bin"])
-    if not bin_path:
-        print(f"Warning: '{config['bin']}' not found in PATH, skipping {name}", file=sys.stderr)
-        return None, None
+AGENTS = [
+    AgentConfig(name="opencode", cli_cmd=["opencode", "run"]),
+    AgentConfig(name="codex", cli_cmd=["codex", "exec", "--full-auto"]),
+]
 
-    cmd = config["build_cmd"](bin_path, prompt, worktree)
 
-    # Append prompt as argument for arg-based agents
-    if config["prompt_via"] == "arg":
-        cmd.append(prompt)
+def which(cmd: str) -> str | None:
+    """Check if a command is available in PATH."""
+    import shutil
+    return shutil.which(cmd)
 
-    lf = open(log_file, "w", encoding="utf-8")
-    stdin_pipe = subprocess.PIPE if config["prompt_via"] == "stdin" else None
-    # opencode uses --dir flag, so cwd not needed; others use cwd
-    if name == "opencode":
-        cwd = None
+
+def create_worktree(repo_root: str, name: str, ts: str) -> str | None:
+    """Create a detached worktree. Returns path or None on failure."""
+    wt_path = os.path.join(repo_root, ".claude", "worktrees", f"verify-{name}-{ts}")
+    try:
+        subprocess.run(
+            ["git", "worktree", "add", wt_path, "HEAD", "--detach"],
+            cwd=repo_root, capture_output=True, text=True, check=True,
+        )
+        return wt_path
+    except subprocess.CalledProcessError as e:
+        print(f"[orchestrator] Failed to create worktree for {name}: {e.stderr}", file=sys.stderr)
+        return None
+
+
+def remove_worktree(repo_root: str, wt_path: str) -> None:
+    """Force-remove a worktree."""
+    try:
+        subprocess.run(
+            ["git", "worktree", "remove", wt_path, "--force"],
+            cwd=repo_root, capture_output=True, text=True,
+        )
+    except Exception:
+        pass
+
+
+def collect_git_result(wt_path: str) -> dict[str, Any]:
+    """Collect commit and diff info from a worktree."""
+    info: dict[str, Any] = {"files_changed": 0, "committed": False, "commit_hash": ""}
+
+    # Check for uncommitted changes
+    diff_stat = subprocess.run(
+        ["git", "diff", "HEAD", "--stat"], cwd=wt_path,
+        capture_output=True, text=True,
+    )
+    uncommitted = bool(diff_stat.stdout.strip())
+
+    # Check for new commits (compare with detached HEAD parent)
+    log_result = subprocess.run(
+        ["git", "log", "--oneline", "-1", "--format=%H"], cwd=wt_path,
+        capture_output=True, text=True,
+    )
+    current_hash = log_result.stdout.strip()
+
+    # Count changed files (committed or uncommitted)
+    if uncommitted:
+        stat_cmd = ["git", "diff", "HEAD", "--name-only"]
     else:
-        cwd = str(worktree)
+        stat_cmd = ["git", "diff", "HEAD~1", "--name-only"]
 
-    # Clean env: remove CLAUDECODE to allow nested Claude Code sessions
-    env = dict(__import__("os").environ)
+    stat_result = subprocess.run(stat_cmd, cwd=wt_path, capture_output=True, text=True)
+    changed_files = [f for f in stat_result.stdout.strip().split("\n") if f]
+    info["files_changed"] = len(changed_files)
+
+    # Check if agent committed
+    parent_check = subprocess.run(
+        ["git", "rev-list", "--count", "HEAD"], cwd=wt_path,
+        capture_output=True, text=True,
+    )
+    original_head_file = os.path.join(wt_path, ".git")
+    # If there's a new commit beyond the detached HEAD
+    diff_check = subprocess.run(
+        ["git", "diff", "--name-only", "HEAD~1"], cwd=wt_path,
+        capture_output=True, text=True,
+    )
+    if diff_check.returncode == 0 and diff_check.stdout.strip():
+        info["committed"] = True
+        info["commit_hash"] = current_hash
+
+    return info
+
+
+def launch_agent(agent: AgentConfig, prompt: str, wt_path: str) -> subprocess.Popen | None:
+    """Launch a CLI agent as a subprocess in its worktree."""
+    cmd_name = agent.cli_cmd[0]
+    if not which(cmd_name):
+        print(f"[orchestrator] {cmd_name} not found in PATH, skipping {agent.name}", file=sys.stderr)
+        return None
+
+    env = os.environ.copy()
+    # Prevent Claude Code nesting detection for child processes
     env.pop("CLAUDECODE", None)
 
-    # Ensure Claude Code can find git-bash on Windows
-    if IS_WINDOWS and name == "claude" and not env.get("CLAUDE_CODE_GIT_BASH_PATH"):
-        bash_path = shutil.which("bash")
-        if bash_path:
-            # Prefer the Git/bin/bash.exe over usr/bin/bash.exe
-            git_bash = Path(bash_path).resolve()
-            # If found under usr/bin, try sibling Git/bin path
-            if "usr" in git_bash.parts:
-                alt = git_bash.parent.parent.parent / "bin" / "bash.exe"
-                if alt.exists():
-                    git_bash = alt
-            env["CLAUDE_CODE_GIT_BASH_PATH"] = str(git_bash)
-
-    proc = subprocess.Popen(
-        cmd, stdout=lf, stderr=subprocess.STDOUT, text=True,
-        stdin=stdin_pipe, cwd=cwd, env=env,
-    )
-
-    # Feed prompt via stdin if needed
-    if config["prompt_via"] == "stdin":
-        try:
-            proc.stdin.write(prompt)
-            proc.stdin.close()
-        except Exception:
-            pass
-
-    return proc, lf
-
-
-def check_worktree_changes(worktree: Path, baseline: str) -> bool:
-    """Check if a worktree has new commits beyond the baseline."""
+    cmd = agent.cli_cmd + [prompt]
+    print(f"[orchestrator] Launching {agent.name}: {' '.join(agent.cli_cmd[:3])}... in {wt_path}")
     try:
-        result = subprocess.run(
-            ["git", "-C", str(worktree), "rev-parse", "HEAD"],
-            capture_output=True, text=True, timeout=10,
+        proc = subprocess.Popen(
+            cmd, cwd=wt_path, env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True,
         )
-        current_head = result.stdout.strip()
-        return current_head != baseline
-    except Exception:
-        return False
+        return proc
+    except Exception as e:
+        print(f"[orchestrator] Failed to launch {agent.name}: {e}", file=sys.stderr)
+        return None
 
 
-def main():
-    configure_stdio()
+def run_agents(
+    repo_root: str,
+    timestamp: str,
+    prompt: str,
+    timeout: int = 600,
+) -> dict[str, Any]:
+    """Main orchestration: create worktrees, launch agents, wait, collect results."""
+    results: dict[str, AgentResult] = {}
+    processes: dict[str, tuple[subprocess.Popen, str, float]] = {}  # name -> (proc, wt_path, start_time)
+    worktree_paths: list[str] = []
 
-    parser = argparse.ArgumentParser(description="Multi-Agent Verify orchestrator")
-    parser.add_argument("--worktree-base", required=True, help="Parent directory for worktrees")
-    parser.add_argument("--timestamp", required=True, help="Timestamp suffix for worktree names")
-    parser.add_argument("--prompt-file", required=True, help="Path to the filled prompt file")
-    parser.add_argument("--check-interval", type=int, default=900, help="Status check interval in seconds (default: 900)")
+    # Create worktrees and launch agents
+    for agent in AGENTS:
+        result = AgentResult(name=agent.name)
+        wt_path = create_worktree(repo_root, agent.name, timestamp)
+        if wt_path is None:
+            result.status = "failed"
+            result.error = "worktree creation failed"
+            results[agent.name] = result
+            continue
+
+        worktree_paths.append(wt_path)
+        agent.worktree_dir = wt_path
+
+        proc = launch_agent(agent, prompt, wt_path)
+        if proc is None:
+            result.status = "failed"
+            result.error = f"{agent.cli_cmd[0]} not found in PATH"
+            results[agent.name] = result
+            continue
+
+        result.status = "running"
+        results[agent.name] = result
+        processes[agent.name] = (proc, wt_path, time.time())
+
+    if not processes:
+        print("[orchestrator] No agents launched successfully", file=sys.stderr)
+        return {"agents": {k: asdict(v) for k, v in results.items()}, "success": False}
+
+    # Poll until all done or timeout
+    print(f"[orchestrator] Waiting for {len(processes)} agents (timeout={timeout}s)...")
+    while processes:
+        for name in list(processes.keys()):
+            proc, wt_path, start_time = processes[name]
+            elapsed = time.time() - start_time
+
+            ret = proc.poll()
+            if ret is not None:
+                # Process finished
+                results[name].status = "completed" if ret == 0 else "failed"
+                results[name].exit_code = ret
+                results[name].duration_seconds = round(elapsed, 1)
+                if ret != 0:
+                    output = proc.stdout.read() if proc.stdout else ""
+                    results[name].error = output[-500:] if len(output) > 500 else output
+                # Collect git info
+                git_info = collect_git_result(wt_path)
+                results[name].files_changed = git_info["files_changed"]
+                results[name].committed = git_info["committed"]
+                results[name].commit_hash = git_info["commit_hash"]
+                del processes[name]
+                print(f"[orchestrator] {name} finished: status={results[name].status}, "
+                      f"exit={ret}, files={git_info['files_changed']}, "
+                      f"duration={results[name].duration_seconds}s")
+
+            elif elapsed > timeout:
+                # Timeout — kill
+                print(f"[orchestrator] {name} timed out after {timeout}s, killing...")
+                try:
+                    proc.send_signal(signal.SIGTERM)
+                    proc.wait(timeout=10)
+                except Exception:
+                    proc.kill()
+                results[name].status = "timeout"
+                results[name].duration_seconds = round(elapsed, 1)
+                results[name].error = f"exceeded {timeout}s timeout"
+                # Still collect any partial results
+                git_info = collect_git_result(wt_path)
+                results[name].files_changed = git_info["files_changed"]
+                results[name].committed = git_info["committed"]
+                results[name].commit_hash = git_info["commit_hash"]
+                del processes[name]
+
+        if processes:
+            time.sleep(5)
+
+    # Summary
+    completed = sum(1 for r in results.values() if r.status == "completed")
+    report = {
+        "agents": {k: asdict(v) for k, v in results.items()},
+        "completed_count": completed,
+        "total_count": len(results),
+        "success": completed > 0,
+        "worktree_paths": worktree_paths,
+    }
+    return report
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Multi-agent verification orchestrator")
+    parser.add_argument("--repo-root", required=True, help="Path to the git repository root")
+    parser.add_argument("--timestamp", required=True, help="Timestamp for worktree naming (YYYYMMDD-HHMMSS)")
+    parser.add_argument("--prompt-file", required=True, help="Path to the verification prompt file")
+    parser.add_argument("--timeout", type=int, default=600, help="Per-agent timeout in seconds (default: 600)")
+    parser.add_argument("--output", default=None, help="Path to write JSON report (default: stdout)")
     args = parser.parse_args()
 
     prompt_path = Path(args.prompt_file)
-    if not prompt_path.exists():
-        print(f"Error: prompt file not found: {prompt_path}", file=sys.stderr)
-        sys.exit(1)
-    prompt = prompt_path.read_text(encoding="utf-8-sig")
-
-    state_dir = Path(".cc-claude-codex")
-    log_dir = state_dir / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    status_file = state_dir / "verify-status.json"
-
-    ts = args.timestamp
-    wt_base = Path(args.worktree_base)
-
-    # Record baseline commit for change detection
-    try:
-        baseline = subprocess.run(
-            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10,
-        ).stdout.strip()
-    except Exception:
-        baseline = ""
-
-    # Launch all agents
-    procs = {}  # name -> {"proc", "log_handle", "log_file", "worktree", "start_time"}
-    for name, config in AGENTS.items():
-        worktree = wt_base / f"verify-{name}-{ts}"
-        if not worktree.exists():
-            print(f"Warning: worktree not found: {worktree}, skipping {name}", file=sys.stderr)
-            continue
-        log_file = log_dir / f"verify-{name}-{ts}.log"
-        proc, lf = launch_agent(name, config, prompt, worktree, log_file)
-        if proc:
-            procs[name] = {
-                "proc": proc,
-                "log_handle": lf,
-                "log_file": log_file,
-                "worktree": worktree,
-                "start_time": time.time(),
-            }
-            print(f"Launched {name} (PID {proc.pid}) in {worktree}", file=sys.stderr)
-
-    if not procs:
-        print("Error: no agents could be launched", file=sys.stderr)
+    if not prompt_path.is_file():
+        print(f"[orchestrator] Prompt file not found: {args.prompt_file}", file=sys.stderr)
         sys.exit(1)
 
-    # Monitor loop
-    try:
-        while True:
-            all_done = True
-            agents_status = {}
+    prompt = prompt_path.read_text(encoding="utf-8")
+    if not prompt.strip():
+        print("[orchestrator] Prompt file is empty", file=sys.stderr)
+        sys.exit(1)
 
-            for name, info in procs.items():
-                elapsed = int(time.time() - info["start_time"])
-                rc = info["proc"].poll()
-                if rc is not None:
-                    # Already finished
-                    agents_status[name] = {
-                        "status": "done",
-                        "exit_code": rc,
-                        "elapsed_min": round(elapsed / 60, 1),
-                        "worktree": str(info["worktree"]),
-                    }
-                else:
-                    all_done = False
-                    agents_status[name] = {
-                        "status": "running",
-                        "pid": info["proc"].pid,
-                        "elapsed_min": round(elapsed / 60, 1),
-                        "worktree": str(info["worktree"]),
-                    }
+    repo_root = os.path.abspath(args.repo_root)
+    if not os.path.isdir(os.path.join(repo_root, ".git")):
+        print(f"[orchestrator] Not a git repository: {repo_root}", file=sys.stderr)
+        sys.exit(1)
 
-            write_status(status_file, agents_status)
+    print(f"[orchestrator] Starting multi-agent verification")
+    print(f"  repo: {repo_root}")
+    print(f"  timestamp: {args.timestamp}")
+    print(f"  prompt: {len(prompt)} chars")
+    print(f"  timeout: {args.timeout}s per agent")
 
-            if all_done:
-                break
+    report = run_agents(
+        repo_root=repo_root,
+        timestamp=args.timestamp,
+        prompt=prompt,
+        timeout=args.timeout,
+    )
 
-            time.sleep(args.check_interval)
+    report_json = json.dumps(report, indent=2, ensure_ascii=False)
 
-    except KeyboardInterrupt:
-        # Kill all running agents
-        for name, info in procs.items():
-            if info["proc"].poll() is None:
-                info["proc"].kill()
-                info["proc"].wait()
-        # Close log handles
-        for info in procs.values():
-            if info["log_handle"] and not info["log_handle"].closed:
-                info["log_handle"].close()
-        # Output partial report
-        agents_status = {}
-        for name, info in procs.items():
-            rc = info["proc"].poll()
-            elapsed = int(time.time() - info["start_time"])
-            agents_status[name] = {
-                "status": "done" if rc is not None else "interrupted",
-                "exit_code": rc,
-                "elapsed_min": round(elapsed / 60, 1),
-                "worktree": str(info["worktree"]),
-                "has_changes": check_worktree_changes(info["worktree"], baseline),
-            }
-        report = {"agents": agents_status, "summary": {"interrupted": True}}
-        print(json.dumps(report, indent=2, ensure_ascii=False))
-        sys.exit(130)
+    if args.output:
+        Path(args.output).write_text(report_json, encoding="utf-8")
+        print(f"[orchestrator] Report written to {args.output}")
+    else:
+        print(report_json)
 
-    # Close all log handles
-    for info in procs.values():
-        if info["log_handle"] and not info["log_handle"].closed:
-            info["log_handle"].close()
-
-    # Build final report
-    agents_report = {}
-    completed = 0
-    failed = 0
-    for name, info in procs.items():
-        rc = info["proc"].returncode
-        elapsed = int(time.time() - info["start_time"])
-        has_changes = check_worktree_changes(info["worktree"], baseline)
-
-        if rc == 0:
-            completed += 1
-            status = "done"
-        else:
-            failed += 1
-            status = "error"
-
-        # Read last 50 lines of log for context
-        log_tail = ""
-        try:
-            lines = info["log_file"].read_text(encoding="utf-8", errors="replace").splitlines()
-            log_tail = "\n".join(lines[-50:])
-        except Exception:
-            pass
-
-        agents_report[name] = {
-            "status": status,
-            "exit_code": rc,
-            "elapsed_min": round(elapsed / 60, 1),
-            "worktree": str(info["worktree"]),
-            "has_changes": has_changes,
-            "log_tail": log_tail,
-        }
-
-    report = {
-        "agents": agents_report,
-        "summary": {
-            "completed": completed,
-            "failed": failed,
-            "total": len(procs),
-        },
-    }
-    print(json.dumps(report, indent=2, ensure_ascii=False))
-
-    # Exit 0 if at least one agent completed, 1 if all failed
-    sys.exit(0 if completed > 0 else 1)
+    sys.exit(0 if report["success"] else 1)
 
 
 if __name__ == "__main__":
     main()
+
+
+
+
