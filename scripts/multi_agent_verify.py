@@ -20,13 +20,21 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import signal
+import shutil
 import subprocess
 import sys
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+
+IS_WINDOWS = sys.platform == "win32"
+
+# Subprocess defaults for Windows encoding compatibility
+_SUBPROCESS_TEXT_KWARGS: dict[str, Any] = {"text": True}
+if IS_WINDOWS:
+    _SUBPROCESS_TEXT_KWARGS["encoding"] = "utf-8"
+    _SUBPROCESS_TEXT_KWARGS["errors"] = "replace"
 
 
 @dataclass
@@ -55,8 +63,7 @@ AGENTS = [
 
 
 def which(cmd: str) -> str | None:
-    """Check if a command is available in PATH."""
-    import shutil
+    """Return the full path to *cmd* (resolves .cmd/.bat on Windows)."""
     return shutil.which(cmd)
 
 
@@ -66,7 +73,7 @@ def create_worktree(repo_root: str, name: str, ts: str) -> str | None:
     try:
         subprocess.run(
             ["git", "worktree", "add", wt_path, "HEAD", "--detach"],
-            cwd=repo_root, capture_output=True, text=True, check=True,
+            cwd=repo_root, capture_output=True, check=True, **_SUBPROCESS_TEXT_KWARGS,
         )
         return wt_path
     except subprocess.CalledProcessError as e:
@@ -79,7 +86,7 @@ def remove_worktree(repo_root: str, wt_path: str) -> None:
     try:
         subprocess.run(
             ["git", "worktree", "remove", wt_path, "--force"],
-            cwd=repo_root, capture_output=True, text=True,
+            cwd=repo_root, capture_output=True, **_SUBPROCESS_TEXT_KWARGS,
         )
     except Exception:
         pass
@@ -92,14 +99,14 @@ def collect_git_result(wt_path: str) -> dict[str, Any]:
     # Check for uncommitted changes
     diff_stat = subprocess.run(
         ["git", "diff", "HEAD", "--stat"], cwd=wt_path,
-        capture_output=True, text=True,
+        capture_output=True, **_SUBPROCESS_TEXT_KWARGS,
     )
     uncommitted = bool(diff_stat.stdout.strip())
 
     # Check for new commits (compare with detached HEAD parent)
     log_result = subprocess.run(
         ["git", "log", "--oneline", "-1", "--format=%H"], cwd=wt_path,
-        capture_output=True, text=True,
+        capture_output=True, **_SUBPROCESS_TEXT_KWARGS,
     )
     current_hash = log_result.stdout.strip()
 
@@ -109,20 +116,20 @@ def collect_git_result(wt_path: str) -> dict[str, Any]:
     else:
         stat_cmd = ["git", "diff", "HEAD~1", "--name-only"]
 
-    stat_result = subprocess.run(stat_cmd, cwd=wt_path, capture_output=True, text=True)
+    stat_result = subprocess.run(stat_cmd, cwd=wt_path, capture_output=True, **_SUBPROCESS_TEXT_KWARGS)
     changed_files = [f for f in stat_result.stdout.strip().split("\n") if f]
     info["files_changed"] = len(changed_files)
 
     # Check if agent committed
     parent_check = subprocess.run(
         ["git", "rev-list", "--count", "HEAD"], cwd=wt_path,
-        capture_output=True, text=True,
+        capture_output=True, **_SUBPROCESS_TEXT_KWARGS,
     )
     original_head_file = os.path.join(wt_path, ".git")
     # If there's a new commit beyond the detached HEAD
     diff_check = subprocess.run(
         ["git", "diff", "--name-only", "HEAD~1"], cwd=wt_path,
-        capture_output=True, text=True,
+        capture_output=True, **_SUBPROCESS_TEXT_KWARGS,
     )
     if diff_check.returncode == 0 and diff_check.stdout.strip():
         info["committed"] = True
@@ -134,7 +141,8 @@ def collect_git_result(wt_path: str) -> dict[str, Any]:
 def launch_agent(agent: AgentConfig, prompt: str, wt_path: str) -> subprocess.Popen | None:
     """Launch a CLI agent as a subprocess in its worktree."""
     cmd_name = agent.cli_cmd[0]
-    if not which(cmd_name):
+    resolved = which(cmd_name)
+    if not resolved:
         print(f"[orchestrator] {cmd_name} not found in PATH, skipping {agent.name}", file=sys.stderr)
         return None
 
@@ -142,13 +150,14 @@ def launch_agent(agent: AgentConfig, prompt: str, wt_path: str) -> subprocess.Po
     # Prevent Claude Code nesting detection for child processes
     env.pop("CLAUDECODE", None)
 
-    cmd = agent.cli_cmd + [prompt]
+    # Use the fully-resolved path so Windows can execute .cmd/.bat wrappers
+    cmd = [resolved] + agent.cli_cmd[1:] + [prompt]
     print(f"[orchestrator] Launching {agent.name}: {' '.join(agent.cli_cmd[:3])}... in {wt_path}")
     try:
         proc = subprocess.Popen(
             cmd, cwd=wt_path, env=env,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True,
+            **_SUBPROCESS_TEXT_KWARGS,
         )
         return proc
     except Exception as e:
@@ -193,6 +202,9 @@ def run_agents(
 
     if not processes:
         print("[orchestrator] No agents launched successfully", file=sys.stderr)
+        # Clean up worktrees that were created but whose agents failed to launch
+        for wt in worktree_paths:
+            remove_worktree(repo_root, wt)
         return {"agents": {k: asdict(v) for k, v in results.items()}, "success": False}
 
     # Poll until all done or timeout
@@ -225,7 +237,7 @@ def run_agents(
                 # Timeout — kill
                 print(f"[orchestrator] {name} timed out after {timeout}s, killing...")
                 try:
-                    proc.send_signal(signal.SIGTERM)
+                    proc.terminate()
                     proc.wait(timeout=10)
                 except Exception:
                     proc.kill()
