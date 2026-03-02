@@ -14,7 +14,7 @@ For Chinese documentation, see `README.zh-CN.md`.
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI
 - [Codex](https://github.com/openai/codex) CLI (`npm i -g @openai/codex`)
-- [OpenCode](https://opencode.ai) CLI (`npm i -g opencode-ai`) — optional, for multi-agent verification
+- [OpenCode](https://opencode.ai) CLI (`npm i -g opencode-ai`) — optional, for multi-agent verification (uses free `minimax-m2.5-free` model by default)
 - Python 3.8+
 
 ## Quickstart

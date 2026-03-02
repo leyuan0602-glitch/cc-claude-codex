@@ -57,7 +57,7 @@ class AgentResult:
 
 
 AGENTS = [
-    AgentConfig(name="opencode", cli_cmd=["opencode", "run"]),
+    AgentConfig(name="opencode", cli_cmd=["opencode", "run", "-m", "opencode/minimax-m2.5-free"]),
     AgentConfig(name="codex", cli_cmd=["codex", "exec", "--full-auto"]),
 ]
 

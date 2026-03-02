@@ -13,7 +13,7 @@ Each agent uses a DIFFERENT launch mechanism:
 
 | Agent | Method | Why |
 |-------|--------|-----|
-| **OpenCode** | `Bash` CLI: `opencode run "..."` | External CLI, no nesting issues |
+| **OpenCode** | `Bash` CLI: `opencode run -m opencode/minimax-m2.5-free "..."` | External CLI, free model, no nesting issues |
 | **Codex** | `Bash` CLI: `codex exec --full-auto "..."` | External CLI, no nesting issues |
 | **Claude** | `Task` tool with `isolation: "worktree"` | MUST use Task tool — `claude` CLI CANNOT run nested inside Claude Code (detects `CLAUDECODE` env var and refuses) |
 

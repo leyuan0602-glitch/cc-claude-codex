@@ -14,7 +14,7 @@ Claude Code 作为监督者（规划、基于测试的验收），Codex 负责�
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI
 - [Codex](https://github.com/openai/codex) CLI（`npm i -g @openai/codex`）
-- [OpenCode](https://opencode.ai) CLI（`npm i -g opencode-ai`）— 可选，用于多 Agent 验证
+- [OpenCode](https://opencode.ai) CLI（`npm i -g opencode-ai`）— 可选，用于多 Agent 验证（默认使用免费的 `minimax-m2.5-free` 模型）
 - Python 3.8+
 
 ## 快速开始
